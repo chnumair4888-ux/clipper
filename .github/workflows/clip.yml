@@ -8,10 +8,46 @@ on:
       clips:
         description: "Kitne clips"
         default: "5"
+      orientation:
+        description: "Shape"
+        type: choice
+        default: vertical
+        options: [vertical, horizontal, both]
+      length:
+        description: "Clip length"
+        type: choice
+        default: short
+        options: [short, medium, long]
+      captions:
+        description: "Captions"
+        type: choice
+        default: words
+        options: [words, lines, none]
+      background:
+        description: "Vertical background"
+        type: choice
+        default: blur
+        options: [blur, crop, black]
+      language:
+        description: "Video language"
+        type: choice
+        default: auto
+        options: [auto, en, ur, hi]
+      title_overlay:
+        description: "Title on top"
+        type: choice
+        default: "yes"
+        options: ["yes", "no"]
+      brand:
+        description: "Channel name watermark (optional)"
+        required: false
+      range:
+        description: "Only these minutes e.g. 10-40 (optional)"
+        required: false
 jobs:
   clip:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,8 +63,20 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VIDEO_URL: ${{ github.event.inputs.url }}
           NUM_CLIPS: ${{ github.event.inputs.clips }}
-        run: python clip.py
+          ORIENT: ${{ github.event.inputs.orientation }}
+          LENGTH: ${{ github.event.inputs.length }}
+          CAPS: ${{ github.event.inputs.captions }}
+          BG: ${{ github.event.inputs.background }}
+          LANG_CODE: ${{ github.event.inputs.language }}
+          TITLE_ON: ${{ github.event.inputs.title_overlay }}
+          BRAND: ${{ github.event.inputs.brand }}
+          RANGE: ${{ github.event.inputs.range }}
+        run: |
+          ls -la
+          F=$(find . -iname 'clipper.py*' -not -path './.git/*' | head -1)
+          echo "Using: $F"
+          python "$F"
       - uses: actions/upload-artifact@v4
         with:
           name: clips
-          path: out/*
+          path: out
