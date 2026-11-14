@@ -45,7 +45,7 @@ on:
         description: "Audio mode"
         type: choice
         default: original
-        options: [original, auto, commentary]
+        options: [original, auto, commentary, music, original+music]
       voice_language:
         description: "Voice language"
         type: choice

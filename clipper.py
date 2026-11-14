@@ -668,6 +668,53 @@ def add_commentary(path, clip, index):
         return False
 
 
+
+# Optional royalty-cleared background music. Add only tracks with documented
+# licenses to music/<style>/ and record source/terms in music/LICENSES.md.
+def add_music(path, clip, index, preset):
+    if AUDIO_MODE not in ("music", "original+music"):
+        return False
+    folder = os.path.join("music", preset)
+    allowed = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+    tracks = sorted(
+        os.path.join(folder, name) for name in os.listdir(folder)
+        if name.lower().endswith(allowed)
+    ) if os.path.isdir(folder) else []
+    if not tracks:
+        note(f"No licensed music track found in {folder}; leaving clip audio unchanged")
+        return False
+    track = tracks[(index - 1) % len(tracks)]
+    temp = path + ".music.mp4"
+    duration = max(0.1, clip[1] - clip[0])
+    has_audio = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "csv=p=0", path],
+        capture_output=True, text=True, check=True).stdout.strip()
+    if AUDIO_MODE == "music" or not has_audio:
+        audio_filter = "[1:a]volume=0.72,afade=t=in:st=0:d=0.35,afade=t=out:st=" + f"{max(0.0, duration-0.6):.3f}:d=0.6[a]"
+    else:
+        audio_filter = (
+            "[1:a]volume=0.38[bgm];"
+            "[bgm][0:a]sidechaincompress=threshold=0.025:ratio=8:attack=25:release=450[ducked];"
+            "[0:a]volume=1.0[orig];"
+            "[orig][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
+            "alimiter=limit=0.89[a]"
+        )
+    try:
+        run(["ffmpeg", "-y", "-i", path, "-stream_loop", "-1", "-i", track,
+             "-filter_complex", audio_filter, "-map", "0:v", "-map", "[a]",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", f"{duration:.3f}",
+             "-movflags", "+faststart", temp])
+        os.replace(temp, path)
+        note(f"Background music added: {os.path.basename(track)} ({AUDIO_MODE})")
+        return True
+    except Exception as exc:
+        if os.path.exists(temp):
+            os.remove(temp)
+        note(f"Music mix failed; keeping existing audio: {type(exc).__name__}")
+        return False
+
+
 orients = ["vertical", "horizontal"] if ORIENT == "both" else [ORIENT]
 has_caps = {}
 lines = []
@@ -679,7 +726,10 @@ for i, clip in enumerate(clips, 1):
             if CAPS == "words" and has_caps[i]:
                 animated_captions(f"c{i}.ass", clip[0], clip[1], o == "vertical")
             render(i, clip, o)
-            add_commentary(f"out/{o}/clip_{i}.mp4", clip, i)
+            output_path = f"out/{o}/clip_{i}.mp4"
+            add_commentary(output_path, clip, i)
+            selected_preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
+            add_music(output_path, clip, i, selected_preset)
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
@@ -696,7 +746,7 @@ with open("out/metadata.json", "w", encoding="utf-8") as metadata:
     json.dump([
         {"clip": i, "start": c[0], "end": c[1], "title": c[2],
          "description": c[3], "hashtags": c[4], "score": c[5],
-         "style": STYLE, "audio": "original"}
+         "style": STYLE, "audio": AUDIO_MODE}
         for i, c in enumerate(clips, 1)
     ], metadata, ensure_ascii=False, indent=2)
 note(f"Clips made: {made}")
