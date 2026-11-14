@@ -8,7 +8,9 @@ ORIENT = E("ORIENT") or "vertical"
 LENGTH = E("LENGTH") or "short"
 CAPS = E("CAPS") or "words"
 BG = E("BG") or "blur"
-LANG = E("LANG_CODE") or "auto"
+LANG_RAW = (E("LANG_CODE") or "English").strip().lower()
+LANG = {"english": "en", "en": "en",
+        "roman urdu": "roman_urdu", "roman_urdu": "roman_urdu"}.get(LANG_RAW, "en")
 TITLE_ON = (E("TITLE_ON") or "yes") == "yes"
 BRAND = (E("BRAND") or "").strip()
 RANGE = (E("RANGE") or "").strip()
@@ -59,7 +61,7 @@ if "drive.google.com" in URL:
     run(["gdown", "--fuzzy", URL, "-O", "video.mp4"])
 else:
     cmd = ["yt-dlp", "--js-runtimes", "node", "--remote-components", "ejs:github",
-           "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+           "-f", "bv*[height<=1080]+ba/b[height<=1080]/b",
            "--merge-output-format", "mp4", "-o", "video.mp4"]
     if write_cookies():
         cmd += ["--cookies", "cookies.txt"]
@@ -278,9 +280,14 @@ if not clips:
 # 3b. Transcribe selected clips only; avoid full-video Whisper analysis.
 if clips and (CAPS != "none" or AUDIO_MODE != "original"):
     try:
-        size = "base" if LANG in ("auto", "ur", "hi") else "tiny"
-        note(f"Whisper model: {size}; selected clips only")
+        size = "base" if LANG == "roman_urdu" else "tiny"
+        note(f"Whisper model: {size}; subtitle language: {LANG}")
         model = WhisperModel(size, device="cpu", compute_type="int8")
+        romanizer = None
+        if LANG == "roman_urdu":
+            import uroman
+            romanizer = uroman.Uroman()
+
         for clip_index, (s, e, *_rest) in enumerate(clips, 1):
             audio_path = f"selected_audio_{clip_index}.wav"
             try:
@@ -289,14 +296,22 @@ if clips and (CAPS != "none" or AUDIO_MODE != "original"):
                                 "-vn", "-ac", "1", "-ar", "16000", audio_path],
                                check=True, timeout=120)
                 segments, info = model.transcribe(
-                    audio_path, language=None if LANG == "auto" else LANG,
+                    audio_path,
+                    language="ur" if LANG == "roman_urdu" else "en",
+                    task="transcribe" if LANG == "roman_urdu" else "translate",
                     vad_filter=False, word_timestamps=True, beam_size=3,
                     condition_on_previous_text=False)
                 for segment in segments:
-                    segs.append((s + segment.start, s + segment.end, segment.text.strip()))
+                    segment_text = segment.text.strip()
+                    if romanizer:
+                        segment_text = romanizer.romanize_string(segment_text, lcode="urd")
+                    segs.append((s + segment.start, s + segment.end, segment_text))
                     for word in segment.words or []:
                         if word.word.strip() and word.start is not None and word.end is not None:
-                            words.append((s + word.start, s + word.end, word.word.strip()))
+                            word_text = word.word.strip()
+                            if romanizer:
+                                word_text = romanizer.romanize_string(word_text, lcode="urd")
+                            words.append((s + word.start, s + word.end, word_text))
             except Exception as exc:
                 note(f"Clip {clip_index} speech unavailable: {type(exc).__name__}")
             finally:
@@ -340,7 +355,7 @@ def ass_timestamp(seconds):
 
 
 def animated_captions(path, start, end, vertical):
-    width, height = (720, 1280) if vertical else (1280, 720)
+    width, height = (1080, 1920) if vertical else (1920, 1080)
     font_size, bottom = (44, 170) if vertical else (36, 55)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
@@ -383,7 +398,7 @@ def animated_captions(path, start, end, vertical):
 def render(i, clip, orient):
     s, e, title = clip[0], clip[1], clip[2]
     vert = orient == "vertical"
-    W, H = (720, 1280) if vert else (1280, 720)
+    W, H = (1080, 1920) if vert else (1920, 1080)
     os.makedirs(f"out/{orient}", exist_ok=True)
     if not vert:
         base = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
@@ -448,10 +463,9 @@ def render(i, clip, orient):
     audio_opts = (["-map", "0:a:0", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]
                   if audio_present else [])
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
-         "-r", "30",
          "-filter_complex", fc, "-map", "[v]", *audio_opts,
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out])
+         "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out])
 
 
 # Optional AI-generated short narration, synthesized with Edge TTS.
