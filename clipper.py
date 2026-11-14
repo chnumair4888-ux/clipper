@@ -43,6 +43,10 @@ LO, HI = {"short": (25, 60), "medium": (60, 100), "long": (120, 180)}[LENGTH]
 FONT = "Noto Sans"
 os.makedirs("out", exist_ok=True)
 report = []
+if not URL:
+    raise SystemExit("VIDEO_URL is required")
+
+
 def note(message):
     safe = str(message).replace(KEY, "[REDACTED]") if KEY else str(message)
     print(safe, flush=True)
