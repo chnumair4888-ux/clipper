@@ -3,30 +3,46 @@ from faster_whisper import WhisperModel
 
 E = os.environ.get
 URL = E("VIDEO_URL", "").strip()
-N = int(E("NUM_CLIPS") or 5)
-ORIENT = E("ORIENT") or "vertical"
-LENGTH = E("LENGTH") or "short"
-CAPS = E("CAPS") or "words"
-BG = E("BG") or "blur"
+try:
+    N = int(E("NUM_CLIPS") or 5)
+except (TypeError, ValueError):
+    N = 5
+N = max(1, min(N, 10))
+ORIENT = (E("ORIENT") or "vertical").lower()
+if ORIENT not in ("vertical", "horizontal", "both"):
+    ORIENT = "vertical"
+LENGTH = (E("LENGTH") or "short").lower()
+if LENGTH not in ("short", "medium", "long"):
+    LENGTH = "short"
+CAPS = (E("CAPS") or "words").lower()
+if CAPS not in ("words", "lines", "none"):
+    CAPS = "words"
+BG = (E("BG") or "blur").lower()
+if BG not in ("blur", "crop", "black"):
+    BG = "blur"
 LANG_RAW = (E("LANG_CODE") or "English").strip().lower()
 LANG = {"english": "en", "en": "en",
         "roman urdu": "roman_urdu", "roman_urdu": "roman_urdu"}.get(LANG_RAW, "en")
-TITLE_ON = (E("TITLE_ON") or "yes") == "yes"
+TITLE_ON = (E("TITLE_ON") or "yes").lower() == "yes"
 BRAND = (E("BRAND") or "").strip()
 RANGE = (E("RANGE") or "").strip()
 KEY = E("GEMINI_API_KEY") or ""
 STYLE = (E("EDIT_STYLE") or "auto").lower()
+if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
+    STYLE = "auto"
 AUDIO_MODE = (E("AUDIO_MODE") or "original").lower()
+if AUDIO_MODE not in ("original", "auto", "commentary", "music", "original+music"):
+    AUDIO_MODE = "original"
 VOICE_LANG = (E("VOICE_LANG") or "en").lower()
+if VOICE_LANG not in ("en", "roman_urdu", "hi"):
+    VOICE_LANG = "en"
 VOICE_GENDER = (E("VOICE_GENDER") or "auto").lower()
+if VOICE_GENDER not in ("auto", "male", "female"):
+    VOICE_GENDER = "auto"
 LO, HI = {"short": (25, 60), "medium": (60, 100), "long": (120, 180)}[LENGTH]
 FONT = "Noto Sans"
 os.makedirs("out", exist_ok=True)
 report = []
-if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
-    STYLE = "auto"
-
-
 def note(message):
     safe = str(message).replace(KEY, "[REDACTED]") if KEY else str(message)
     print(safe, flush=True)
