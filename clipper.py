@@ -80,33 +80,10 @@ dur = float(subprocess.check_output(
     ["ffprobe", "-v", "error", "-show_entries", "format=duration",
      "-of", "csv=p=0", "video.mp4"]).decode().strip())
 
-# 2. Transcribe (word level)
-size = "small" if LANG in ("ur", "hi", "auto") else "base"
-note(f"Whisper model: {size}")
+# Visual-first highlight selection; speech is transcribed only after selection.
 note(f"Editing preset: {STYLE}; audio mode: {AUDIO_MODE}")
-if AUDIO_MODE != "original":
-    note("AI commentary requested; voice generation will be attempted per clip")
-model = WhisperModel(size, device="cpu", compute_type="int8")
-def transcribe(vad):
-    it, info = model.transcribe(
-        "video.mp4", language=None if LANG == "auto" else LANG,
-        vad_filter=vad, word_timestamps=True)
-    segs, words = [], []
-    for segment in it:
-        segs.append((segment.start, segment.end, segment.text.strip()))
-        for word in segment.words or []:
-            if word.word.strip() and word.start is not None and word.end is not None:
-                words.append((word.start, word.end, word.word.strip()))
-    return segs, words, info
-
-
-segs, words, info = transcribe(True)
-if not words:
-    note("No word timestamps with VAD; retrying without VAD")
-    segs, words, info = transcribe(False)
-note(f"Detected language: {info.language}; segments: {len(segs)}; words: {len(words)}")
-transcript = "\n".join(f"[{int(a)}s] {t}" for a, b, t in segs)
-
+transcript = ""
+segs, words = [], []
 
 # 3. Pick best moments with Gemini
 def list_models():
@@ -165,8 +142,8 @@ def visual_picks():
     import base64
     from PIL import Image, ImageOps, ImageDraw
     import io
-    interval = max(4.0, dur / 36)
-    stamps = [round(i * interval, 1) for i in range(min(36, max(1, int(dur / interval))))]
+    interval = max(5.0, dur / 24)
+    stamps = [round(i * interval, 1) for i in range(min(24, max(1, int(dur / interval))))]
     thumbs = []
     for index, at in enumerate(stamps):
         try:
@@ -214,7 +191,7 @@ def visual_picks():
                     {"inline_data": {"mime_type": "image/jpeg",
                                      "data": base64.b64encode(buf.getvalue()).decode("ascii")}}
                 ]}], "generationConfig": {"responseMimeType": "application/json"}},
-                timeout=180)
+                timeout=65)
             if not response.ok:
                 note(f"Visual Gemini {model_name}: HTTP {response.status_code}")
                 continue
@@ -241,12 +218,9 @@ prompt = (
     + transcript[:150000])
 if not KEY:
     note("GEMINI_API_KEY missing; check repository Actions secrets")
-if not segs:
-    note("No speech detected; Gemini transcript selection skipped")
 picks = visual_picks() if KEY else None
-if not picks and KEY and segs:
-    note("Visual selection unavailable; trying transcript selection")
-    picks = ask(prompt)
+if not picks:
+    note("Visual AI unavailable; using timeline fallback without full-video transcription")
 
 
 def tags(x):
@@ -301,6 +275,36 @@ if not clips:
     note(f"Fallback clips selected: {len(clips)}")
 
 
+# 3b. Transcribe selected clips only; avoid full-video Whisper analysis.
+if clips and (CAPS != "none" or AUDIO_MODE != "original"):
+    try:
+        size = "base" if LANG in ("auto", "ur", "hi") else "tiny"
+        note(f"Whisper model: {size}; selected clips only")
+        model = WhisperModel(size, device="cpu", compute_type="int8")
+        for clip_index, (s, e, *_rest) in enumerate(clips, 1):
+            audio_path = f"selected_audio_{clip_index}.wav"
+            try:
+                subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+                                "-ss", str(s), "-i", "video.mp4", "-t", str(e-s),
+                                "-vn", "-ac", "1", "-ar", "16000", audio_path],
+                               check=True, timeout=120)
+                segments, info = model.transcribe(
+                    audio_path, language=None if LANG == "auto" else LANG,
+                    vad_filter=True, word_timestamps=True, beam_size=1)
+                for segment in segments:
+                    segs.append((s + segment.start, s + segment.end, segment.text.strip()))
+                    for word in segment.words or []:
+                        if word.word.strip() and word.start is not None and word.end is not None:
+                            words.append((s + word.start, s + word.end, word.word.strip()))
+            except Exception as exc:
+                note(f"Clip {clip_index} speech unavailable: {type(exc).__name__}")
+            finally:
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+        note(f"Selected speech: {len(segs)} segments; {len(words)} words")
+    except Exception as exc:
+        note(f"Speech analysis unavailable: {type(exc).__name__}")
+
 # 4. Captions helpers
 def ts(x):
     x = max(x, 0)
@@ -336,7 +340,7 @@ def ass_timestamp(seconds):
 
 def animated_captions(path, start, end, vertical):
     width, height = (720, 1280) if vertical else (1280, 720)
-    font_size, bottom = (58, 280) if vertical else (42, 65)
+    font_size, bottom = (44, 170) if vertical else (36, 55)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -346,7 +350,7 @@ def animated_captions(path, start, end, vertical):
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Pop,{FONT},{font_size},&H0000FFFF,&H00FFFFFF,&H00000000,"
+        f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,"
         f"&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,50,50,{bottom},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
@@ -392,7 +396,7 @@ def render(i, clip, orient):
               "esports": "eq=contrast=1.12:saturation=1.18"}
     chain.append(grades[preset])
     # Subtle motion/punch-in for action-heavy presets.
-    if preset in ("viral", "funny", "esports"):
+    if False:  # Disable distracting automatic gameplay zoom
         zoom = 1.10 if preset == "esports" else 1.06
         zw, zh = int(W * zoom) // 2 * 2, int(H * zoom) // 2 * 2
         chain.append(
@@ -402,10 +406,10 @@ def render(i, clip, orient):
         )
     if TITLE_ON and vert and not title.lower().startswith(("clip ", "video highlight")):
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
-            file.write(textwrap.fill(title.upper(), 20))
-        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=50:fontcolor=white:"
-                     "borderw=6:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=240:"
-                     "enable='lt(t,4)'")
+            file.write(textwrap.fill(title, 28))
+        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=32:fontcolor=white:"
+                     "borderw=3:bordercolor=black:line_spacing=6:x=(w-text_w)/2:y=90:"
+                     "enable='lt(t,2.8)'")
     if BRAND:
         with open("brand.txt", "w", encoding="utf-8") as file:
             file.write(BRAND)
@@ -415,10 +419,10 @@ def render(i, clip, orient):
                      "x=w-text_w-40:y=h-text_h-80")
     if CAPS != "none" and has_caps[i]:
         if CAPS == "words":
-            fs, col = (88, ",PrimaryColour=&H0000FFFF") if vert else (70, ",PrimaryColour=&H0000FFFF")
+            fs, col = (44, "") if vert else (36, "")
         else:
             fs, col = (64, "") if vert else (52, "")
-        mv = 280 if vert else 50
+        mv = 170 if vert else 50
         if CAPS == "words":
             chain.append(f"subtitles=c{i}.ass")
         else:
