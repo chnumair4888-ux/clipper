@@ -686,21 +686,22 @@ def add_music(path, clip, index, preset):
     track = tracks[(index - 1) % len(tracks)]
     temp = path + ".music.mp4"
     duration = max(0.1, clip[1] - clip[0])
-    has_audio = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a",
-         "-show_entries", "stream=index", "-of", "csv=p=0", path],
-        capture_output=True, text=True, check=True).stdout.strip()
-    if AUDIO_MODE == "music" or not has_audio:
-        audio_filter = "[1:a]volume=0.72,afade=t=in:st=0:d=0.35,afade=t=out:st=" + f"{max(0.0, duration-0.6):.3f}:d=0.6[a]"
-    else:
-        audio_filter = (
-            "[1:a]volume=0.38[bgm];"
-            "[bgm][0:a]sidechaincompress=threshold=0.025:ratio=8:attack=25:release=450[ducked];"
-            "[0:a]volume=1.0[orig];"
-            "[orig][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
-            "alimiter=limit=0.89[a]"
-        )
     try:
+        has_audio = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True).stdout.strip()
+        if AUDIO_MODE == "music" or not has_audio:
+            audio_filter = "[1:a]volume=0.72,afade=t=in:st=0:d=0.35,afade=t=out:st=" + f"{max(0.0, duration-0.6):.3f}:d=0.6[a]"
+        else:
+            audio_filter = (
+                "[1:a]volume=0.38[bgm];"
+                "[bgm][0:a]sidechaincompress=threshold=0.025:ratio=8:attack=25:release=450[ducked];"
+                "[0:a]volume=1.0[orig];"
+                "[orig][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
+                "alimiter=limit=0.89[a]"
+            )
+    
         run(["ffmpeg", "-y", "-i", path, "-stream_loop", "-1", "-i", track,
              "-filter_complex", audio_filter, "-map", "0:v", "-map", "[a]",
              "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", f"{duration:.3f}",
