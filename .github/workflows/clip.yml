@@ -88,6 +88,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow uroman
 
+      - name: Check Python syntax
+        run: python -m py_compile clipper.py
+
       - name: Run clipper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
