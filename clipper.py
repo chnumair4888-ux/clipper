@@ -157,6 +157,80 @@ def ask(prompt):
     return None
 
 
+
+# Visual highlight analysis: sample gameplay frames even when nobody speaks.
+def visual_picks():
+    if not KEY:
+        return None
+    import base64
+    from PIL import Image, ImageOps, ImageDraw
+    import io
+    interval = max(4.0, dur / 36)
+    stamps = [round(i * interval, 1) for i in range(min(36, max(1, int(dur / interval))))]
+    thumbs = []
+    for index, at in enumerate(stamps):
+        try:
+            frame = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-ss", str(at),
+                 "-i", "video.mp4", "-frames:v", "1",
+                 "-vf", "scale=320:180:force_original_aspect_ratio=decrease",
+                 "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+                capture_output=True, timeout=25, check=True).stdout
+            img = Image.open(io.BytesIO(frame)).convert("RGB")
+            tile = Image.new("RGB", (340, 214), "#141414")
+            tile.paste(img, ((340-img.width)//2, 24))
+            ImageDraw.Draw(tile).text((8, 5), f"{at:.1f}s", fill="white")
+            thumbs.append(tile)
+        except Exception as exc:
+            note(f"Frame sample {index} unavailable: {type(exc).__name__}")
+    if not thumbs:
+        return None
+    columns = 4
+    rows = (len(thumbs) + columns - 1) // columns
+    sheet = Image.new("RGB", (columns * 340, rows * 214), "#101010")
+    for i, tile in enumerate(thumbs):
+        sheet.paste(tile, ((i % columns) * 340, (i // columns) * 214))
+    buf = io.BytesIO()
+    sheet.save(buf, "JPEG", quality=72)
+    os.makedirs("out", exist_ok=True)
+    sheet.save("out/visual_contact_sheet.jpg", "JPEG", quality=72)
+    prompt = (
+        f"Analyze these timestamped gaming frames sampled from a {dur:.1f}-second video. "
+        f"Select up to {N} non-overlapping engaging moments of {LO}-{HI} seconds each. "
+        "Use visual evidence: fights, movement, dramatic scene changes, discoveries, "
+        "fails, wins. Frames are sparse, so do NOT invent kills, wins or events not "
+        "visually supported. Pick timestamps inside video duration. "
+        "Score confidence 1-10. For ambiguous footage use neutral accurate titles. "
+        "Return only JSON array with keys start,end,title,description,hashtags,score. "
+        "Transcript if available: " + transcript[:9000]
+    )
+    for model_name in list(dict.fromkeys(list_models() + ["gemini-2.5-flash"])):
+        try:
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                headers={"x-goog-api-key": KEY},
+                json={"contents": [{"parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": "image/jpeg",
+                                     "data": base64.b64encode(buf.getvalue()).decode("ascii")}}
+                ]}], "generationConfig": {"responseMimeType": "application/json"}},
+                timeout=180)
+            if not response.ok:
+                note(f"Visual Gemini {model_name}: HTTP {response.status_code}")
+                continue
+            raw = "".join(p.get("text", "") for p in
+                          response.json()["candidates"][0]["content"]["parts"])
+            result = json.loads(raw)
+            if isinstance(result, dict):
+                result = next((v for v in result.values() if isinstance(v, list)), [])
+            if isinstance(result, list) and result:
+                note(f"Visual Gemini model: {model_name}; candidates: {len(result)}")
+                return result
+        except Exception as exc:
+            note(f"Visual Gemini failed: {type(exc).__name__}")
+    return None
+
+
 prompt = (
     f"Below is a gaming video transcript with timestamps in seconds. Pick the {N} best moments "
     f"for short-form clips (funny, hype, shocking, big reactions). Each clip must be {LO} to {HI} "
@@ -169,7 +243,10 @@ if not KEY:
     note("GEMINI_API_KEY missing; check repository Actions secrets")
 if not segs:
     note("No speech detected; Gemini transcript selection skipped")
-picks = ask(prompt) if (KEY and segs) else None
+picks = visual_picks() if KEY else None
+if not picks and KEY and segs:
+    note("Visual selection unavailable; trying transcript selection")
+    picks = ask(prompt)
 
 
 def tags(x):
