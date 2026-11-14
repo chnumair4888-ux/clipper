@@ -3,6 +3,7 @@ from pathlib import Path
 import unittest
 
 WORKFLOW = Path(".github/workflows/clip.yml").read_text(encoding="utf-8")
+DASHBOARD = Path("index.html").read_text(encoding="utf-8")
 
 
 class WorkflowContractTests(unittest.TestCase):
@@ -30,6 +31,17 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("--retry-all-errors", WORKFLOW)
         self.assertIn("--connect-timeout 20", WORKFLOW)
         self.assertIn("--max-time 900", WORKFLOW)
+
+    def test_dashboard_clip_limit_matches_workflow_limit(self):
+        self.assertIn('max="10"', DASHBOARD)
+        self.assertIn("between 1 and 10 clips", DASHBOARD)
+
+    def test_dashboard_validates_time_range(self):
+        self.assertIn("start-end in minutes", DASHBOARD)
+        self.assertIn("end <= start", DASHBOARD)
+
+    def test_dashboard_does_not_claim_webhook_ack_means_processing_started(self):
+        self.assertIn("does not confirm that GitHub Actions started", DASHBOARD)
 
     def test_secrets_are_not_printed(self):
         self.assertNotIn('echo "$ORACLE_UPLOAD_TOKEN"', WORKFLOW)
