@@ -290,7 +290,7 @@ if clips and (CAPS != "none" or AUDIO_MODE != "original"):
                                check=True, timeout=120)
                 segments, info = model.transcribe(
                     audio_path, language=None if LANG == "auto" else LANG,
-                    vad_filter=True, word_timestamps=True, beam_size=1)
+                    vad_filter=False, word_timestamps=True, beam_size=3,\n                    condition_on_previous_text=False)
                 for segment in segments:
                     segs.append((s + segment.start, s + segment.end, segment.text.strip()))
                     for word in segment.words or []:
@@ -312,7 +312,7 @@ def ts(x):
 
 
 def write_srt(path, s, e):
-    gsize = 2 if CAPS == "words" else 6
+    gsize = 5 if CAPS == "words" else 7
     ws = [w for w in words if w[1] > s and w[0] < e]
     groups, cur = [], []
     for w in ws:
@@ -356,17 +356,26 @@ def animated_captions(path, start, end, vertical):
         "MarginV, Effect, Text\n"
     )
     visible = [w for w in words if w[1] > start and w[0] < end]
+    groups, current = [], []
+    for word in visible:
+        if current and (len(current) >= 5 or word[0] - current[-1][1] > 0.65):
+            groups.append(current)
+            current = []
+        current.append(word)
+    if current:
+        groups.append(current)
     with open(path, "w", encoding="utf-8") as f:
         f.write(header)
-        for a, b, word in visible:
-            a, b = max(a, start) - start, min(b, end) - start
+        for group in groups:
+            a = max(0.0, group[0][0] - start)
+            b = min(end - start, max(group[-1][1] - start, a + 0.65))
             if b <= a:
                 continue
-            clean = word.replace("\\", "").replace("{", "(").replace("}", ")")
-            pop = r"{\fscx120\fscy120\t(0,130,\fscx100\fscy100)}"
-            f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,"
-                    f"{pop}{clean}\n")
-    return len(visible)
+            caption = " ".join(w[2] for w in group)
+            caption = caption.replace("\\", "").replace("{", "(").replace("}", ")")
+            caption = caption.replace("\\N", " ")
+            f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,{caption}\\n")
+    return len(groups)
 
 
 # 5. Render
