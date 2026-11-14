@@ -248,6 +248,45 @@ def write_srt(path, s, e):
     return len(groups)
 
 
+def ass_timestamp(seconds):
+    seconds = max(0.0, seconds)
+    hours = int(seconds // 3600)
+    minutes = int(seconds % 3600 // 60)
+    remainder = seconds % 60
+    return f"{hours}:{minutes:02d}:{remainder:05.2f}"
+
+
+def animated_captions(path, start, end, vertical):
+    width, height = (1080, 1920) if vertical else (1920, 1080)
+    font_size, bottom = (82, 420) if vertical else (60, 90)
+    header = (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {width}\nPlayResY: {height}\n"
+        "WrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Pop,{FONT},{font_size},&H0000FFFF,&H00FFFFFF,&H00000000,"
+        f"&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,50,50,{bottom},1\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+    )
+    visible = [w for w in words if w[1] > start and w[0] < end]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(header)
+        for a, b, word in visible:
+            a, b = max(a, start) - start, min(b, end) - start
+            if b <= a:
+                continue
+            clean = word.replace("\\", "").replace("{", "(").replace("}", ")")
+            pop = r"{\fscx120\fscy120\t(0,130,\fscx100\fscy100)}"
+            f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,"
+                    f"{pop}{clean}\n")
+    return len(visible)
+
+
 # 5. Render
 def render(i, clip, orient):
     s, e, title = clip[0], clip[1], clip[2]
@@ -293,9 +332,12 @@ def render(i, clip, orient):
         else:
             fs, col = (64, "") if vert else (52, "")
         mv = 420 if vert else 70
-        chain.append(f"subtitles=c{i}.srt:original_size={W}x{H}:"
-                     f"force_style='FontName={FONT},FontSize={fs},Bold=1,Outline=5,Shadow=0,"
-                     f"Alignment=2,MarginV={mv}{col}'")
+        if CAPS == "words":
+            chain.append(f"subtitles=c{i}.ass")
+        else:
+            chain.append(f"subtitles=c{i}.srt:original_size={W}x{H}:"
+                         f"force_style='FontName={FONT},FontSize={fs},Bold=1,Outline=5,"
+                         f"Shadow=0,Alignment=2,MarginV={mv}{col}'")
     fc = base + ";[v0]" + ",".join(chain or ["null"]) + "[v]"
     out = f"out/{orient}/clip_{i}.mp4"
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
@@ -313,6 +355,8 @@ for i, clip in enumerate(clips, 1):
     has_caps[i] = write_srt(f"c{i}.srt", clip[0], clip[1]) > 0 if CAPS != "none" else False
     for o in orients:
         try:
+            if CAPS == "words" and has_caps[i]:
+                animated_captions(f"c{i}.ass", clip[0], clip[1], o == "vertical")
             render(i, clip, o)
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
