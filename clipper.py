@@ -715,9 +715,41 @@ def add_music(path, clip, index, preset):
         return False
 
 
+def validate_output(path, orient, expected_duration):
+    """Check the encoded deliverable with ffprobe before counting it as complete."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-show_format",
+         "-of", "json", path],
+        capture_output=True, text=True, check=True)
+    data = json.loads(probe.stdout)
+    video = next((x for x in data.get("streams", []) if x.get("codec_type") == "video"), None)
+    if not video:
+        raise RuntimeError("Output has no video stream")
+    expected_size = (1080, 1920) if orient == "vertical" else (1920, 1080)
+    actual_size = (int(video.get("width", 0)), int(video.get("height", 0)))
+    if actual_size != expected_size:
+        raise RuntimeError(f"Unexpected output size {actual_size}; expected {expected_size}")
+    if video.get("codec_name") != "h264":
+        raise RuntimeError(f"Unexpected video codec: {video.get('codec_name')}")
+    if video.get("pix_fmt") != "yuv420p":
+        raise RuntimeError(f"Unexpected pixel format: {video.get('pix_fmt')}")
+    actual_duration = float(data.get("format", {}).get("duration", 0) or 0)
+    if actual_duration <= 0 or abs(actual_duration - expected_duration) > 1.5:
+        raise RuntimeError(f"Output duration mismatch: {actual_duration:.2f}s")
+    audio = any(x.get("codec_type") == "audio" for x in data.get("streams", []))
+    return {
+        "file": path, "video_codec": video.get("codec_name"),
+        "pixel_format": video.get("pix_fmt"), "width": actual_size[0],
+        "height": actual_size[1], "duration_seconds": round(actual_duration, 3),
+        "frame_rate": video.get("avg_frame_rate"),
+        "audio_present": audio, "status": "passed"
+    }
+
+
 orients = ["vertical", "horizontal"] if ORIENT == "both" else [ORIENT]
 has_caps = {}
 lines = []
+quality_results = []
 made = 0
 for i, clip in enumerate(clips, 1):
     has_caps[i] = write_srt(f"c{i}.srt", clip[0], clip[1]) > 0 if CAPS != "none" else False
@@ -730,6 +762,7 @@ for i, clip in enumerate(clips, 1):
             add_commentary(output_path, clip, i)
             selected_preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
             add_music(output_path, clip, i, selected_preset)
+            quality_results.append(validate_output(output_path, o, e - s))
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
@@ -742,6 +775,8 @@ for i, clip in enumerate(clips, 1):
                  f"Hashtags: {clip[4]}\nScore: {clip[5]}\n")
 
 open("out/titles.txt", "w", encoding="utf-8").write("\n".join(lines))
+with open("out/quality_report.json", "w", encoding="utf-8") as quality_file:
+    json.dump(quality_results, quality_file, ensure_ascii=False, indent=2)
 with open("out/metadata.json", "w", encoding="utf-8") as metadata:
     json.dump([
         {"clip": i, "start": c[0], "end": c[1], "title": c[2],
