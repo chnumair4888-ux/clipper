@@ -1,4 +1,4 @@
-import os, json, subprocess, textwrap, requests
+import os, json, subprocess, textwrap, requests, asyncio
 from faster_whisper import WhisperModel
 
 E = os.environ.get
@@ -84,7 +84,7 @@ size = "small" if LANG in ("ur", "hi", "auto") else "base"
 note(f"Whisper model: {size}")
 note(f"Editing preset: {STYLE}; audio mode: {AUDIO_MODE}")
 if AUDIO_MODE != "original":
-    note("AI voiceover not yet implemented; original audio retained")
+    note("AI commentary requested; voice generation will be attempted per clip")
 model = WhisperModel(size, device="cpu", compute_type="int8")
 def transcribe(vad):
     it, info = model.transcribe(
@@ -356,6 +356,80 @@ def render(i, clip, orient):
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out])
 
 
+# Optional AI-generated short narration, synthesized with Edge TTS.
+def narration_text(clip):
+    if not KEY:
+        note("Commentary needs GEMINI_API_KEY; keeping original audio")
+        return None
+    language = {"en": "English", "roman_urdu": "Roman Urdu (Latin letters)",
+                "hi": "Hindi in Devanagari"}.get(VOICE_LANG, "English")
+    prompt = (
+        f"Write exactly ONE short, exciting gaming commentator sentence in {language}. "
+        "Maximum 16 words. Do not claim an event occurred unless it is evident "
+        "from the transcript. No hashtags, emoji, markdown or quotes. "
+        f"Clip title: {clip[2]}. "
+        f"Transcript: {' '.join(t for a,b,t in segs if b > clip[0] and a < clip[1])[:1600]}"
+    )
+    try:
+        response = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            params={"key": KEY},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=60)
+        response.raise_for_status()
+        value = "".join(part.get("text", "") for part in
+                        response.json()["candidates"][0]["content"]["parts"]).strip()
+        return value[:240] or None
+    except Exception as exc:
+        note(f"Commentary text unavailable: {exc}")
+        return None
+
+
+def add_commentary(path, clip, index):
+    if AUDIO_MODE == "original":
+        return False
+    if AUDIO_MODE == "auto" and clip[5] < 7:
+        return False
+    narration = narration_text(clip)
+    if not narration:
+        return False
+    voices = {
+        "en": ("en-US-GuyNeural", "en-US-JennyNeural"),
+        "roman_urdu": ("ur-PK-AsadNeural", "ur-PK-UzmaNeural"),
+        "hi": ("hi-IN-MadhurNeural", "hi-IN-SwaraNeural")
+    }
+    male, female = voices.get(VOICE_LANG, voices["en"])
+    voice = male if VOICE_GENDER == "male" else female
+    if VOICE_GENDER == "auto":
+        voice = male
+    try:
+        import edge_tts
+        voice_path = f"voice_{index}.mp3"
+        asyncio.run(edge_tts.Communicate(narration, voice).save(voice_path))
+        temp = path + ".vo.mp4"
+        # Mix the generated narration over quieter original gameplay audio.
+        has_audio = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True).stdout.strip()
+        if has_audio:
+            audio_args = ["-filter_complex",
+                          "[0:a]volume=0.22[game];[1:a]volume=1.5[voice];"
+                          "[game][voice]amix=inputs=2:duration=first:dropout_transition=0[a]",
+                          "-map", "0:v", "-map", "[a]"]
+        else:
+            audio_args = ["-map", "0:v", "-map", "1:a"]
+        run(["ffmpeg", "-y", "-i", path, "-i", voice_path, *audio_args,
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+             "-t", str(clip[1] - clip[0]), "-movflags", "+faststart", temp])
+        os.replace(temp, path)
+        note(f"AI commentary added to clip {index}: {narration}")
+        return True
+    except Exception as exc:
+        note(f"AI voice unavailable; original audio preserved: {exc}")
+        return False
+
+
 orients = ["vertical", "horizontal"] if ORIENT == "both" else [ORIENT]
 has_caps = {}
 lines = []
@@ -367,6 +441,7 @@ for i, clip in enumerate(clips, 1):
             if CAPS == "words" and has_caps[i]:
                 animated_captions(f"c{i}.ass", clip[0], clip[1], o == "vertical")
             render(i, clip, o)
+            add_commentary(f"out/{o}/clip_{i}.mp4", clip, i)
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
