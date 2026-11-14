@@ -13,10 +13,16 @@ TITLE_ON = (E("TITLE_ON") or "yes") == "yes"
 BRAND = (E("BRAND") or "").strip()
 RANGE = (E("RANGE") or "").strip()
 KEY = E("GEMINI_API_KEY") or ""
+STYLE = (E("EDIT_STYLE") or "auto").lower()
+AUDIO_MODE = (E("AUDIO_MODE") or "original").lower()
+VOICE_LANG = (E("VOICE_LANG") or "en").lower()
+VOICE_GENDER = (E("VOICE_GENDER") or "auto").lower()
 LO, HI = {"short": (25, 60), "medium": (60, 100), "long": (120, 180)}[LENGTH]
 FONT = "Noto Sans"
 os.makedirs("out", exist_ok=True)
 report = []
+if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
+    STYLE = "auto"
 
 
 def note(message):
@@ -76,6 +82,9 @@ dur = float(subprocess.check_output(
 # 2. Transcribe (word level)
 size = "small" if LANG in ("ur", "hi", "auto") else "base"
 note(f"Whisper model: {size}")
+note(f"Editing preset: {STYLE}; audio mode: {AUDIO_MODE}")
+if AUDIO_MODE != "original":
+    note("AI voiceover not yet implemented; original audio retained")
 model = WhisperModel(size, device="cpu", compute_type="int8")
 def transcribe(vad):
     it, info = model.transcribe(
@@ -259,6 +268,12 @@ def render(i, clip, orient):
                 f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v0]")
     chain = []
+    preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
+    grades = {"viral": "eq=contrast=1.08:saturation=1.12",
+              "cinematic": "eq=contrast=1.05:saturation=1.06",
+              "funny": "eq=saturation=1.15",
+              "esports": "eq=contrast=1.12:saturation=1.18"}
+    chain.append(grades[preset])
     if TITLE_ON and vert:
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
             file.write(textwrap.fill(title.upper(), 20))
