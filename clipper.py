@@ -16,6 +16,13 @@ KEY = E("GEMINI_API_KEY") or ""
 LO, HI = {"short": (25, 60), "medium": (60, 100), "long": (120, 180)}[LENGTH]
 FONT = "Noto Sans"
 os.makedirs("out", exist_ok=True)
+report = []
+
+
+def note(message):
+    print(message, flush=True)
+    report.append(str(message))
+
 
 
 def run(cmd):
@@ -60,44 +67,83 @@ if "-" in RANGE:
              "-c", "copy", "trimmed.mp4"])
         os.replace("trimmed.mp4", "video.mp4")
     except Exception as ex:
-        print("Range ignored:", ex)
+        note(f"Range ignored: {ex}")
 
 dur = float(subprocess.check_output(
     ["ffprobe", "-v", "error", "-show_entries", "format=duration",
      "-of", "csv=p=0", "video.mp4"]).decode().strip())
 
 # 2. Transcribe (word level)
-size = "small" if LANG in ("ur", "hi") else "base"
+size = "small" if LANG in ("ur", "hi", "auto") else "base"
+note(f"Whisper model: {size}")
 model = WhisperModel(size, device="cpu", compute_type="int8")
-it, info = model.transcribe("video.mp4", language=None if LANG == "auto" else LANG,
-                            vad_filter=True, word_timestamps=True)
-segs, words = [], []
-for s in it:
-    segs.append((s.start, s.end, s.text.strip()))
-    for w in (s.words or []):
-        if w.word.strip():
-            words.append((w.start, w.end, w.word.strip()))
-print("Segments:", len(segs), "Words:", len(words))
+def transcribe(vad):
+    it, info = model.transcribe(
+        "video.mp4", language=None if LANG == "auto" else LANG,
+        vad_filter=vad, word_timestamps=True)
+    segs, words = [], []
+    for segment in it:
+        segs.append((segment.start, segment.end, segment.text.strip()))
+        for word in segment.words or []:
+            if word.word.strip() and word.start is not None and word.end is not None:
+                words.append((word.start, word.end, word.word.strip()))
+    return segs, words, info
+
+
+segs, words, info = transcribe(True)
+if not words:
+    note("No word timestamps with VAD; retrying without VAD")
+    segs, words, info = transcribe(False)
+note(f"Detected language: {info.language}; segments: {len(segs)}; words: {len(words)}")
 transcript = "\n".join(f"[{int(a)}s] {t}" for a, b, t in segs)
 
 
 # 3. Pick best moments with Gemini
+def list_models():
+    try:
+        response = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            params={"key": KEY, "pageSize": 200}, timeout=45)
+        response.raise_for_status()
+        models = []
+        for item in response.json().get("models", []):
+            name = item.get("name", "").split("/")[-1]
+            methods = item.get("supportedGenerationMethods", [])
+            if ("generateContent" in methods and "flash" in name
+                    and not any(x in name for x in
+                                ("lite", "image", "tts", "live", "audio",
+                                 "vision", "embedding", "robotics"))):
+                models.append(name)
+        return sorted(set(models), reverse=True)
+    except Exception as exc:
+        note(f"Gemini model discovery failed: {exc}")
+        return []
+
+
 def ask(prompt):
-    for m in ["gemini-2.5-flash", "gemini-2.0-flash"]:
+    models = list(dict.fromkeys(list_models() + ["gemini-2.5-flash"]))
+    for name in models:
         try:
-            r = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{name}:generateContent",
                 params={"key": KEY},
                 json={"contents": [{"parts": [{"text": prompt}]}],
                       "generationConfig": {"responseMimeType": "application/json"}},
                 timeout=180)
-            r.raise_for_status()
-            data = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+            if not response.ok:
+                note(f"Gemini {name}: HTTP {response.status_code} {response.text[:250]}")
+                continue
+            parts = response.json()["candidates"][0]["content"]["parts"]
+            data = json.loads("".join(p.get("text", "") for p in parts))
             if isinstance(data, dict):
                 data = next((v for v in data.values() if isinstance(v, list)), [])
+            if not isinstance(data, list) or not data:
+                note(f"Gemini {name}: empty or invalid picks")
+                continue
+            note(f"Gemini model used: {name}; proposed clips: {len(data)}")
             return data
-        except Exception as ex:
-            print("Gemini failed:", m, ex)
+        except Exception as exc:
+            note(f"Gemini {name} failed: {exc}")
     return None
 
 
@@ -109,6 +155,10 @@ prompt = (
     'Return ONLY JSON: [{"start": number, "end": number, "title": "catchy title max 8 words", '
     '"description": "1-2 sentences", "hashtags": "#a #b #c #d #e", "score": 1-10}]\n\n'
     + transcript[:150000])
+if not KEY:
+    note("GEMINI_API_KEY missing; check repository Actions secrets")
+if not segs:
+    note("No speech detected; Gemini transcript selection skipped")
 picks = ask(prompt) if (KEY and segs) else None
 
 
@@ -120,7 +170,7 @@ clips = []
 for p in (picks or []):
     try:
         s, e = float(p["start"]), float(p["end"])
-        if s < 0 or s >= dur or not (LO * 0.6 <= e - s <= HI * 1.3):
+        if s < 0 or e > dur or s >= dur or not (LO * 0.6 <= e - s <= HI * 1.3):
             continue
         e = min(e, dur)
         if any(s < c[1] and e > c[0] for c in clips):
@@ -133,12 +183,35 @@ clips.sort(key=lambda c: -c[5])
 clips = clips[:N]
 
 if not clips:
-    print("Using fallback: evenly spaced clips")
-    L = min((LO + HI) / 2, dur)
-    step = dur / (N + 1)
-    for i in range(N):
-        s = max(0, min(step * (i + 1), dur - L))
-        clips.append((s, s + L, f"Clip {i+1}", "", "#gaming #gta6 #shorts", 0))
+    note("No valid Gemini picks; using speech-density fallback")
+    clip_length = min((LO + HI) / 2, dur)
+    candidates = []
+    if words:
+        t = 0.0
+        while t + clip_length <= dur + 0.01:
+            count = sum(1 for w in words if t <= w[0] < t + clip_length)
+            candidates.append((count, t))
+            t += 5
+        candidates.sort(reverse=True)
+    else:
+        candidates = [(0, t) for t in
+                      [i * clip_length for i in range(max(1, int(dur // clip_length)))]]
+    for _, t in candidates:
+        e = min(t + clip_length, dur)
+        if e - t < min(LO * 0.6, dur):
+            continue
+        if any(t < c[1] and e > c[0] for c in clips):
+            continue
+        nearby = [text for a, b, text in segs if b > t and a < e]
+        title = " ".join(" ".join(nearby).split()[:7]).strip(" .,!?:;")
+        clips.append((t, e, title or f"Clip {len(clips)+1}",
+                      "Highlight from the video", "#shorts #highlights", 0))
+        if len(clips) >= N:
+            break
+    if not clips and dur > 0:
+        clips = [(0, dur, "Video Highlight", "Highlight from the video",
+                  "#shorts #highlights", 0)]
+    note(f"Fallback clips selected: {len(clips)}")
 
 
 # 4. Captions helpers
@@ -161,7 +234,7 @@ def write_srt(path, s, e):
     with open(path, "w", encoding="utf-8") as f:
         for n, g in enumerate(groups, 1):
             a = max(g[0][0], s) - s
-            b = max(min(g[-1][1], e) - s, a + 0.3)
+            b = min(e - s, max(min(g[-1][1], e) - s, a + 0.3))
             f.write(f"{n}\n{ts(a)} --> {ts(b)}\n{' '.join(x[2] for x in g)}\n\n")
     return len(groups)
 
@@ -187,12 +260,14 @@ def render(i, clip, orient):
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v0]")
     chain = []
     if TITLE_ON and vert:
-        open(f"t{i}.txt", "w", encoding="utf-8").write(textwrap.fill(title.upper(), 20))
+        with open(f"t{i}.txt", "w", encoding="utf-8") as file:
+            file.write(textwrap.fill(title.upper(), 20))
         chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=72:fontcolor=white:"
                      "borderw=6:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=240:"
                      "enable='lt(t,4)'")
     if BRAND:
-        open("brand.txt", "w", encoding="utf-8").write(BRAND)
+        with open("brand.txt", "w", encoding="utf-8") as file:
+            file.write(BRAND)
         fs = 40 if vert else 34
         chain.append(f"drawtext=textfile=brand.txt:font='{FONT}':fontsize={fs}:"
                      "fontcolor=white@0.7:borderw=3:bordercolor=black@0.7:"
@@ -225,14 +300,19 @@ for i, clip in enumerate(clips, 1):
         try:
             render(i, clip, o)
             made += 1
+            thumb = f"out/{o}/thumb_{i}.jpg"
+            subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
+                            f"out/{o}/clip_{i}.mp4", "-frames:v", "1",
+                            "-q:v", "2", thumb], check=True)
         except Exception as ex:
-            print("Render failed:", i, o, ex)
-    subprocess.run(["ffmpeg", "-y", "-ss", str(clip[0] + 2), "-i", "video.mp4",
-                    "-frames:v", "1", "-q:v", "2", f"out/thumb_{i}.jpg"])
+            note(f"Render failed: clip {i} {o}: {ex}")
+
     lines.append(f"clip_{i}\nTitle: {clip[2]}\nDescription: {clip[3]}\n"
                  f"Hashtags: {clip[4]}\nScore: {clip[5]}\n")
 
 open("out/titles.txt", "w", encoding="utf-8").write("\n".join(lines))
-print("Clips made:", made)
+note(f"Clips made: {made}")
+with open("out/report.txt", "w", encoding="utf-8") as file:
+    file.write("\n".join(report) + "\n")
 if made == 0:
     raise SystemExit(1)
