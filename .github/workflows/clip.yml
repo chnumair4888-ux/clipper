@@ -119,7 +119,8 @@ jobs:
           test -n "$ORACLE_UPLOAD_URL"
           test -n "$ORACLE_UPLOAD_TOKEN"
           find out -type f -name '*.mp4' -print0 | while IFS= read -r -d '' file; do
-            name="$(basename "$file")"
+            name="${file#out/}"
+            name="${name//\//_}"
             echo "Uploading $name"
             curl --fail --show-error --silent \
               --retry 2 \
