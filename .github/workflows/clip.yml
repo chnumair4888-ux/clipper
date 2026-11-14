@@ -77,7 +77,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core
-          pip install -U yt-dlp gdown faster-whisper requests edge-tts
+          pip install -U yt-dlp gdown faster-whisper requests edge-tts pillow
       - name: Run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
