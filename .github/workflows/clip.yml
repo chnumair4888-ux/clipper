@@ -98,6 +98,9 @@ jobs:
       - name: Check Python syntax
         run: python -m py_compile clipper.py
 
+      - name: Test workflow safeguards
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
       - name: Run clipper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
