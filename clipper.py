@@ -624,7 +624,9 @@ def narration_text(clip):
 
 
 def add_commentary(path, clip, index):
-    if AUDIO_MODE == "original":
+    # Narration is only available in the explicit commentary modes.
+    # Music-only and music-mix modes must not unexpectedly synthesize a voice.
+    if AUDIO_MODE not in ("auto", "commentary"):
         return False
     if AUDIO_MODE == "auto" and clip[5] < 7:
         return False
