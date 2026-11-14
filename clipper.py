@@ -525,14 +525,15 @@ def render(i, clip, orient):
               "funny": "eq=saturation=1.15",
               "esports": "eq=contrast=1.12:saturation=1.18"}
     chain.append(grades[preset])
-    # Subtle motion/punch-in for action-heavy presets.
-    if False:  # Disable distracting automatic gameplay zoom
-        zoom = 1.10 if preset == "esports" else 1.06
+    # Restrained punch-in for high-confidence highlights only.
+    # This is a gentle editorial effect, not AI event tracking or smart reframing.
+    if vert and clip[5] >= 8 and preset in ("viral", "esports", "cinematic"):
+        zoom = {"viral": 1.035, "esports": 1.05, "cinematic": 1.025}[preset]
         zw, zh = int(W * zoom) // 2 * 2, int(H * zoom) // 2 * 2
         chain.append(
             f"scale={zw}:{zh},crop={W}:{H}:"
-            "x='(in_w-out_w)/2+(in_w-out_w)*0.15*sin(t*1.4)':"
-            "y='(in_h-out_h)/2+(in_h-out_h)*0.10*sin(t*1.1)'"
+            "x='(in_w-out_w)/2+(in_w-out_w)*0.035*sin(t*0.7)':"
+            "y='(in_h-out_h)/2+(in_h-out_h)*0.025*sin(t*0.55)'"
         )
     if TITLE_ON and vert and not title.lower().startswith(("clip ", "video highlight")):
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
@@ -559,6 +560,15 @@ def render(i, clip, orient):
             chain.append(f"subtitles=c{i}.srt:original_size={W}x{H}:"
                          f"force_style='FontName={FONT},FontSize={fs},Bold=1,Outline=5,"
                          f"Shadow=0,Alignment=2,MarginV={mv}{col}'")
+    # Short, subtle video fades make clip boundaries feel intentional.
+    clip_duration = max(0.0, e - s)
+    fade_duration = min(0.18, clip_duration / 4)
+    if fade_duration > 0:
+        fade_out_start = max(0.0, clip_duration - fade_duration)
+        chain.append(
+            f"fade=t=in:st=0:d={fade_duration:.3f},"
+            f"fade=t=out:st={fade_out_start:.3f}:d={fade_duration:.3f}"
+        )
     fc = base + ";[v0]" + ",".join(chain or ["null"]) + "[v]"
     out = f"out/{orient}/clip_{i}.mp4"
     audio_present = subprocess.run(
