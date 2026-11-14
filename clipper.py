@@ -82,10 +82,88 @@ dur = float(subprocess.check_output(
     ["ffprobe", "-v", "error", "-show_entries", "format=duration",
      "-of", "csv=p=0", "video.mp4"]).decode().strip())
 
-# Visual-first highlight selection; speech is transcribed only after selection.
+
+# Transcribe the source video before highlight selection.
+# The same timestamps are reused later for captions.
 note(f"Editing preset: {STYLE}; audio mode: {AUDIO_MODE}")
 transcript = ""
 segs, words = [], []
+
+def transcribe_full_video():
+    global transcript
+
+    audio_path = "full_video_audio.wav"
+    try:
+        note("Preparing full-video audio for highlight analysis")
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+             "-i", "video.mp4", "-vn", "-ac", "1", "-ar", "16000",
+             "-c:a", "pcm_s16le", audio_path],
+            check=True, timeout=900
+        )
+
+        size = "base" if LANG == "roman_urdu" else "tiny"
+        note(f"Full-video Whisper model: {size}; language: {LANG}")
+        model = WhisperModel(size, device="cpu", compute_type="int8")
+
+        romanizer = None
+        if LANG == "roman_urdu":
+            import uroman
+            romanizer = uroman.Uroman()
+
+        segments, info = model.transcribe(
+            audio_path,
+            language="ur" if LANG == "roman_urdu" else "en",
+            task="transcribe" if LANG == "roman_urdu" else "translate",
+            vad_filter=True,
+            word_timestamps=True,
+            beam_size=3,
+            condition_on_previous_text=False
+        )
+
+        transcript_lines = []
+        for segment in segments:
+            segment_text = segment.text.strip()
+            if romanizer:
+                segment_text = romanizer.romanize_string(
+                    segment_text, lcode="urd"
+                )
+
+            if segment_text:
+                transcript_lines.append(
+                    f"[{segment.start:.1f}-{segment.end:.1f}] {segment_text}"
+                )
+                segs.append((
+                    segment.start, segment.end, segment_text
+                ))
+
+            for word in segment.words or []:
+                if word.word.strip() and word.start is not None and word.end is not None:
+                    word_text = word.word.strip()
+                    if romanizer:
+                        word_text = romanizer.romanize_string(
+                            word_text, lcode="urd"
+                        )
+                    words.append((
+                        word.start,
+                        word.end,
+                        word_text
+                    ))
+
+        transcript = "\n".join(transcript_lines)
+        note(
+            f"Full-video speech: {len(segs)} segments; "
+            f"{len(words)} words; transcript characters: {len(transcript)}"
+        )
+
+    except Exception as exc:
+        note(f"Full-video transcription unavailable: {type(exc).__name__}")
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+
+transcribe_full_video()
 
 # 3. Pick best moments with Gemini
 def list_models():
@@ -222,7 +300,7 @@ if not KEY:
     note("GEMINI_API_KEY missing; check repository Actions secrets")
 picks = visual_picks() if KEY else None
 if not picks:
-    note("Visual AI unavailable; using timeline fallback without full-video transcription")
+    note("Visual AI unavailable; using transcript-based fallback where speech is available")
 
 
 def tags(x):
@@ -230,96 +308,123 @@ def tags(x):
 
 
 clips = []
-for p in (picks or []):
-    try:
-        s, e = float(p["start"]), float(p["end"])
-        if s < 0 or e > dur or s >= dur or not (LO * 0.6 <= e - s <= HI * 1.3):
-            continue
-        e = min(e, dur)
-        if any(s < c[1] and e > c[0] for c in clips):
-            continue
-        clips.append((s, e, str(p.get("title", "Clip"))[:80], str(p.get("description", "")),
-                      tags(p.get("hashtags", "")), float(p.get("score", 0))))
-    except Exception:
-        pass
-clips.sort(key=lambda c: -c[5])
-clips = clips[:N]
+valid_picks = []
 
+for item in (picks or []):
+    try:
+        if not isinstance(item, dict):
+            continue
+
+        start_time = float(item["start"])
+        end_time = float(item["end"])
+        score = float(item.get("score", 0))
+
+        if not all(map(lambda x: __import__("math").isfinite(x),
+                       (start_time, end_time, score))):
+            continue
+
+        duration = end_time - start_time
+
+        if start_time < 0 or end_time > dur or start_time >= dur:
+            continue
+        if not (LO * 0.6 <= duration <= HI * 1.3):
+            continue
+        if not (1 <= score <= 10):
+            continue
+
+        title = " ".join(str(item.get("title", "Gaming Highlight")).split())[:80]
+        description = " ".join(str(item.get("description", "")).split())[:500]
+        hashtags = tags(item.get("hashtags", ""))[:250]
+
+        valid_picks.append((
+            start_time, end_time, title or "Gaming Highlight",
+            description, hashtags, score
+        ))
+
+    except (TypeError, ValueError, KeyError, OverflowError):
+        continue
+
+# Highest-confidence clips first; reject overlaps and near-duplicates.
+valid_picks.sort(key=lambda clip: clip[5], reverse=True)
+
+for candidate in valid_picks:
+    s_time, e_time = candidate[0], candidate[1]
+
+    if any(
+        s_time < existing[1] + 2 and e_time > existing[0] - 2
+        for existing in clips
+    ):
+        continue
+
+    clips.append(candidate)
+
+    if len(clips) >= N:
+        break
+
+note(f"Gemini picks received: {len(picks or [])}; valid non-overlapping clips: {len(clips)}")
 if not clips:
-    note("No valid Gemini picks; using speech-density fallback")
+    note("No valid Gemini picks; building fallback candidates")
     clip_length = min((LO + HI) / 2, dur)
     candidates = []
+
     if words:
         t = 0.0
         while t + clip_length <= dur + 0.01:
-            count = sum(1 for w in words if t <= w[0] < t + clip_length)
-            candidates.append((count, t))
+            count = sum(
+                1 for w in words
+                if t <= w[0] < t + clip_length
+            )
+            # Do not select windows with no detected speech.
+            if count > 0:
+                candidates.append((count, t))
             t += 5
-        candidates.sort(reverse=True)
-    else:
-        candidates = [(0, t) for t in
-                      [i * clip_length for i in range(max(1, int(dur // clip_length)))]]
+
+        if not candidates:
+            note("No speech detected in candidate windows; using timeline fallback")
+
+    if not candidates:
+        step = max(clip_length, 1.0)
+        candidates = [
+            (0, i * step)
+            for i in range(max(1, int(dur // step)))
+        ]
+
+    candidates.sort(reverse=True)
+
     for _, t in candidates:
         e = min(t + clip_length, dur)
         if e - t < min(LO * 0.6, dur):
             continue
         if any(t < c[1] and e > c[0] for c in clips):
             continue
-        nearby = [text for a, b, text in segs if b > t and a < e]
-        title = " ".join(" ".join(nearby).split()[:7]).strip(" .,!?:;")
-        clips.append((t, e, title or f"Clip {len(clips)+1}",
-                      "Highlight from the video", "#shorts #highlights", 0))
+
+        nearby = [
+            text for a, b, text in segs
+            if b > t and a < e
+        ]
+        title = " ".join(
+            " ".join(nearby).split()[:7]
+        ).strip(" .,!?:;")
+
+        clips.append((
+            t, e,
+            title or f"Clip {len(clips)+1}",
+            "Highlight from the video",
+            "#shorts #highlights",
+            0
+        ))
+
         if len(clips) >= N:
             break
+
     if not clips and dur > 0:
-        clips = [(0, dur, "Video Highlight", "Highlight from the video",
-                  "#shorts #highlights", 0)]
+        clips = [(
+            0, dur, "Video Highlight",
+            "Highlight from the video",
+            "#shorts #highlights", 0
+        )]
+
     note(f"Fallback clips selected: {len(clips)}")
-
-
-# 3b. Transcribe selected clips only; avoid full-video Whisper analysis.
-if clips and (CAPS != "none" or AUDIO_MODE != "original"):
-    try:
-        size = "base" if LANG == "roman_urdu" else "tiny"
-        note(f"Whisper model: {size}; subtitle language: {LANG}")
-        model = WhisperModel(size, device="cpu", compute_type="int8")
-        romanizer = None
-        if LANG == "roman_urdu":
-            import uroman
-            romanizer = uroman.Uroman()
-
-        for clip_index, (s, e, *_rest) in enumerate(clips, 1):
-            audio_path = f"selected_audio_{clip_index}.wav"
-            try:
-                subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-                                "-ss", str(s), "-i", "video.mp4", "-t", str(e-s),
-                                "-vn", "-ac", "1", "-ar", "16000", audio_path],
-                               check=True, timeout=120)
-                segments, info = model.transcribe(
-                    audio_path,
-                    language="ur" if LANG == "roman_urdu" else "en",
-                    task="transcribe" if LANG == "roman_urdu" else "translate",
-                    vad_filter=False, word_timestamps=True, beam_size=3,
-                    condition_on_previous_text=False)
-                for segment in segments:
-                    segment_text = segment.text.strip()
-                    if romanizer:
-                        segment_text = romanizer.romanize_string(segment_text, lcode="urd")
-                    segs.append((s + segment.start, s + segment.end, segment_text))
-                    for word in segment.words or []:
-                        if word.word.strip() and word.start is not None and word.end is not None:
-                            word_text = word.word.strip()
-                            if romanizer:
-                                word_text = romanizer.romanize_string(word_text, lcode="urd")
-                            words.append((s + word.start, s + word.end, word_text))
-            except Exception as exc:
-                note(f"Clip {clip_index} speech unavailable: {type(exc).__name__}")
-            finally:
-                if os.path.exists(audio_path):
-                    os.remove(audio_path)
-        note(f"Selected speech: {len(segs)} segments; {len(words)} words")
-    except Exception as exc:
-        note(f"Speech analysis unavailable: {type(exc).__name__}")
 
 # 4. Captions helpers
 def ts(x):
