@@ -764,7 +764,7 @@ for i, clip in enumerate(clips, 1):
             add_commentary(output_path, clip, i)
             selected_preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
             add_music(output_path, clip, i, selected_preset)
-            quality_results.append(validate_output(output_path, o, e - s))
+            quality_results.append(validate_output(output_path, o, clip[1] - clip[0]))
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
