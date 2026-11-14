@@ -26,8 +26,9 @@ if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
 
 
 def note(message):
-    print(message, flush=True)
-    report.append(str(message))
+    safe = str(message).replace(KEY, "[REDACTED]") if KEY else str(message)
+    print(safe, flush=True)
+    report.append(safe)
 
 
 
@@ -125,7 +126,7 @@ def list_models():
                 models.append(name)
         return sorted(set(models), reverse=True)
     except Exception as exc:
-        note(f"Gemini model discovery failed: {exc}")
+        note(f"Gemini model discovery failed: {type(exc).__name__}")
         return []
 
 
@@ -152,7 +153,7 @@ def ask(prompt):
             note(f"Gemini model used: {name}; proposed clips: {len(data)}")
             return data
         except Exception as exc:
-            note(f"Gemini {name} failed: {exc}")
+            note(f"Gemini {name} failed: {type(exc).__name__}")
     return None
 
 
@@ -257,8 +258,8 @@ def ass_timestamp(seconds):
 
 
 def animated_captions(path, start, end, vertical):
-    width, height = (1080, 1920) if vertical else (1920, 1080)
-    font_size, bottom = (82, 420) if vertical else (60, 90)
+    width, height = (720, 1280) if vertical else (1280, 720)
+    font_size, bottom = (58, 280) if vertical else (42, 65)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -291,7 +292,7 @@ def animated_captions(path, start, end, vertical):
 def render(i, clip, orient):
     s, e, title = clip[0], clip[1], clip[2]
     vert = orient == "vertical"
-    W, H = (1080, 1920) if vert else (1920, 1080)
+    W, H = (720, 1280) if vert else (1280, 720)
     os.makedirs(f"out/{orient}", exist_ok=True)
     if not vert:
         base = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
@@ -322,10 +323,10 @@ def render(i, clip, orient):
             "x='(in_w-out_w)/2+(in_w-out_w)*0.15*sin(t*1.4)':"
             "y='(in_h-out_h)/2+(in_h-out_h)*0.10*sin(t*1.1)'"
         )
-    if TITLE_ON and vert:
+    if TITLE_ON and vert and not title.lower().startswith(("clip ", "video highlight")):
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
             file.write(textwrap.fill(title.upper(), 20))
-        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=72:fontcolor=white:"
+        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=50:fontcolor=white:"
                      "borderw=6:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=240:"
                      "enable='lt(t,4)'")
     if BRAND:
@@ -340,7 +341,7 @@ def render(i, clip, orient):
             fs, col = (88, ",PrimaryColour=&H0000FFFF") if vert else (70, ",PrimaryColour=&H0000FFFF")
         else:
             fs, col = (64, "") if vert else (52, "")
-        mv = 420 if vert else 70
+        mv = 280 if vert else 50
         if CAPS == "words":
             chain.append(f"subtitles=c{i}.ass")
         else:
@@ -356,8 +357,9 @@ def render(i, clip, orient):
     audio_opts = (["-map", "0:a:0", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]
                   if audio_present else [])
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
+         "-r", "30",
          "-filter_complex", fc, "-map", "[v]", *audio_opts,
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out])
 
 
@@ -377,7 +379,7 @@ def narration_text(clip):
     )
     try:
         response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{(list_models() or ['gemini-2.5-flash'])[0]}:generateContent",
             params={"key": KEY},
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=60)
@@ -386,7 +388,7 @@ def narration_text(clip):
                         response.json()["candidates"][0]["content"]["parts"]).strip()
         return value[:240] or None
     except Exception as exc:
-        note(f"Commentary text unavailable: {exc}")
+        note(f"Commentary text unavailable: {type(exc).__name__}")
         return None
 
 
@@ -431,7 +433,7 @@ def add_commentary(path, clip, index):
         note(f"AI commentary added to clip {index}: {narration}")
         return True
     except Exception as exc:
-        note(f"AI voice unavailable; original audio preserved: {exc}")
+        note(f"AI voice unavailable; original audio preserved: {type(exc).__name__}")
         return False
 
 
