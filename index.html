@@ -52,7 +52,7 @@ button:disabled{opacity:.55;cursor:wait}
 <div class="field">
 <label for="range">Video time range (minutes)</label>
 <input id="range" name="range" placeholder="Example: 0-15">
-<small>Choose 1–10 clips. Leave blank to process the full video.</small>
+<small>Choose between 1 and 10 clips. Leave blank to process the full video.</small>
 </div>
 </div>
 </section>
@@ -153,7 +153,7 @@ button:disabled{opacity:.55;cursor:wait}
 <h2>04 — GENERATE</h2>
 <button id="submitBtn" type="submit">⚡ GENERATE CLIPS</button>
 <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
-<small>After submission, check the GitHub Actions run to confirm processing actually started. This page does not yet show live render progress or publishing status.</small>
+<small>A successful webhook acknowledgement does not confirm that GitHub Actions started. After submission, check the GitHub Actions run. This page does not yet show live render progress or publishing status.</small>
 </section>
 </form>
 <div class="note">AI GAMING CLIPPER · Dashboard preview build</div>
@@ -164,9 +164,32 @@ const form = document.getElementById('clipForm');
 const button = document.getElementById('submitBtn');
 const statusBox = document.getElementById('status');
 
+function validateTimeRange(value) {
+  const range = value.trim();
+  if (!range) return true;
+  const match = range.match(/^(\\d+(?:\\.\\d+)?)-(\\d+(?:\\.\\d+)?)$/);
+  if (!match) {
+    statusBox.textContent = 'Enter a valid start-end in minutes range, for example 0-15.';
+    return false;
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    statusBox.textContent = 'The end time must be greater than the start time; end <= start is not allowed.';
+    return false;
+  }
+  return true;
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!form.reportValidity()) return;
+
+  statusBox.style.display = 'block';
+  if (!validateTimeRange(document.getElementById('range').value)) {
+    statusBox.style.background = '#402329';
+    return;
+  }
 
   const data = new URLSearchParams(new FormData(form));
   button.disabled = true;
