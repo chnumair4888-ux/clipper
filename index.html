@@ -79,7 +79,7 @@ button:disabled{opacity:.55;cursor:wait}
 <div class="field">
 <label for="captions">Subtitles style</label>
 <select id="captions" name="captions">
-<option value="words">Animated word captions</option>
+<option value="words">Karaoke word-by-word captions</option>
 <option value="lines">Full subtitle lines</option>
 <option value="none">No captions</option>
 </select>
@@ -121,6 +121,8 @@ button:disabled{opacity:.55;cursor:wait}
 <option value="original">Original audio</option>
 <option value="auto">Automatic audio</option>
 <option value="commentary">AI commentary</option>
+<option value="music">Music only</option>
+<option value="original+music">Original audio + background music</option>
 </select>
 </div>
 <div class="field">
@@ -144,7 +146,7 @@ button:disabled{opacity:.55;cursor:wait}
 <input id="brand" name="brand" placeholder="AI Gaming Clipper">
 </div>
 </div>
-<small>Title overlay is currently enabled by the existing workflow. Advanced music and sound-effect controls will be added after we verify the editing pipeline.</small>
+<small>Music modes require verified licensed tracks to be installed on the clipper. No music is bundled by default; if no matching track is installed, the original audio is preserved.</small>
 </section>
 
 <section class="panel">
