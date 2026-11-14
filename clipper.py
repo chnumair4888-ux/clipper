@@ -3,28 +3,48 @@ from faster_whisper import WhisperModel
 
 E = os.environ.get
 URL = E("VIDEO_URL", "").strip()
-N = int(E("NUM_CLIPS") or 5)
-ORIENT = E("ORIENT") or "vertical"
-LENGTH = E("LENGTH") or "short"
-CAPS = E("CAPS") or "words"
-BG = E("BG") or "blur"
+try:
+    N = int(E("NUM_CLIPS") or 5)
+except (TypeError, ValueError):
+    N = 5
+N = max(1, min(N, 10))
+ORIENT = (E("ORIENT") or "vertical").lower()
+if ORIENT not in ("vertical", "horizontal", "both"):
+    ORIENT = "vertical"
+LENGTH = (E("LENGTH") or "short").lower()
+if LENGTH not in ("short", "medium", "long"):
+    LENGTH = "short"
+CAPS = (E("CAPS") or "words").lower()
+if CAPS not in ("words", "lines", "none"):
+    CAPS = "words"
+BG = (E("BG") or "blur").lower()
+if BG not in ("blur", "crop", "black"):
+    BG = "blur"
 LANG_RAW = (E("LANG_CODE") or "English").strip().lower()
 LANG = {"english": "en", "en": "en",
         "roman urdu": "roman_urdu", "roman_urdu": "roman_urdu"}.get(LANG_RAW, "en")
-TITLE_ON = (E("TITLE_ON") or "yes") == "yes"
+TITLE_ON = (E("TITLE_ON") or "yes").lower() == "yes"
 BRAND = (E("BRAND") or "").strip()
 RANGE = (E("RANGE") or "").strip()
 KEY = E("GEMINI_API_KEY") or ""
 STYLE = (E("EDIT_STYLE") or "auto").lower()
+if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
+    STYLE = "auto"
 AUDIO_MODE = (E("AUDIO_MODE") or "original").lower()
+if AUDIO_MODE not in ("original", "auto", "commentary", "music", "original+music"):
+    AUDIO_MODE = "original"
 VOICE_LANG = (E("VOICE_LANG") or "en").lower()
+if VOICE_LANG not in ("en", "roman_urdu", "hi"):
+    VOICE_LANG = "en"
 VOICE_GENDER = (E("VOICE_GENDER") or "auto").lower()
+if VOICE_GENDER not in ("auto", "male", "female"):
+    VOICE_GENDER = "auto"
 LO, HI = {"short": (25, 60), "medium": (60, 100), "long": (120, 180)}[LENGTH]
 FONT = "Noto Sans"
 os.makedirs("out", exist_ok=True)
 report = []
-if STYLE not in ("auto", "viral", "cinematic", "funny", "esports"):
-    STYLE = "auto"
+if not URL:
+    raise SystemExit("VIDEO_URL is required")
 
 
 def note(message):
@@ -624,7 +644,9 @@ def narration_text(clip):
 
 
 def add_commentary(path, clip, index):
-    if AUDIO_MODE == "original":
+    # Narration is only available in the explicit commentary modes.
+    # Music-only and music-mix modes must not unexpectedly synthesize a voice.
+    if AUDIO_MODE not in ("auto", "commentary"):
         return False
     if AUDIO_MODE == "auto" and clip[5] < 7:
         return False
@@ -686,21 +708,24 @@ def add_music(path, clip, index, preset):
     track = tracks[(index - 1) % len(tracks)]
     temp = path + ".music.mp4"
     duration = max(0.1, clip[1] - clip[0])
-    has_audio = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a",
-         "-show_entries", "stream=index", "-of", "csv=p=0", path],
-        capture_output=True, text=True, check=True).stdout.strip()
-    if AUDIO_MODE == "music" or not has_audio:
-        audio_filter = "[1:a]volume=0.72,afade=t=in:st=0:d=0.35,afade=t=out:st=" + f"{max(0.0, duration-0.6):.3f}:d=0.6[a]"
-    else:
-        audio_filter = (
-            "[1:a]volume=0.38[bgm];"
-            "[bgm][0:a]sidechaincompress=threshold=0.025:ratio=8:attack=25:release=450[ducked];"
-            "[0:a]volume=1.0[orig];"
-            "[orig][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
-            "alimiter=limit=0.89[a]"
-        )
     try:
+        has_audio = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True).stdout.strip()
+        if AUDIO_MODE == "music" or not has_audio:
+            audio_filter = (
+                "[1:a]volume=0.72,afade=t=in:st=0:d=0.35,"
+                "afade=t=out:st=" + f"{max(0.0, duration-0.6):.3f}:d=0.6[a]"
+            )
+        else:
+            audio_filter = (
+                "[1:a]volume=0.38[bgm];"
+                "[bgm][0:a]sidechaincompress=threshold=0.025:ratio=8:attack=25:release=450[ducked];"
+                "[0:a]volume=1.0[orig];"
+                "[orig][ducked]amix=inputs=2:duration=first:dropout_transition=2,"
+                "alimiter=limit=0.89[a]"
+            )
         run(["ffmpeg", "-y", "-i", path, "-stream_loop", "-1", "-i", track,
              "-filter_complex", audio_filter, "-map", "0:v", "-map", "[a]",
              "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", f"{duration:.3f}",
@@ -714,10 +739,41 @@ def add_music(path, clip, index, preset):
         note(f"Music mix failed; keeping existing audio: {type(exc).__name__}")
         return False
 
+def validate_output(path, orient, expected_duration):
+    """Check the encoded deliverable with ffprobe before counting it as complete."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-show_format",
+         "-of", "json", path],
+        capture_output=True, text=True, check=True)
+    data = json.loads(probe.stdout)
+    video = next((x for x in data.get("streams", []) if x.get("codec_type") == "video"), None)
+    if not video:
+        raise RuntimeError("Output has no video stream")
+    expected_size = (1080, 1920) if orient == "vertical" else (1920, 1080)
+    actual_size = (int(video.get("width", 0)), int(video.get("height", 0)))
+    if actual_size != expected_size:
+        raise RuntimeError(f"Unexpected output size {actual_size}; expected {expected_size}")
+    if video.get("codec_name") != "h264":
+        raise RuntimeError(f"Unexpected video codec: {video.get('codec_name')}")
+    if video.get("pix_fmt") != "yuv420p":
+        raise RuntimeError(f"Unexpected pixel format: {video.get('pix_fmt')}")
+    actual_duration = float(data.get("format", {}).get("duration", 0) or 0)
+    if actual_duration <= 0 or abs(actual_duration - expected_duration) > 1.5:
+        raise RuntimeError(f"Output duration mismatch: {actual_duration:.2f}s")
+    audio = any(x.get("codec_type") == "audio" for x in data.get("streams", []))
+    return {
+        "file": path, "video_codec": video.get("codec_name"),
+        "pixel_format": video.get("pix_fmt"), "width": actual_size[0],
+        "height": actual_size[1], "duration_seconds": round(actual_duration, 3),
+        "frame_rate": video.get("avg_frame_rate"),
+        "audio_present": audio, "status": "passed"
+    }
+
 
 orients = ["vertical", "horizontal"] if ORIENT == "both" else [ORIENT]
 has_caps = {}
 lines = []
+quality_results = []
 made = 0
 for i, clip in enumerate(clips, 1):
     has_caps[i] = write_srt(f"c{i}.srt", clip[0], clip[1]) > 0 if CAPS != "none" else False
@@ -730,6 +786,14 @@ for i, clip in enumerate(clips, 1):
             add_commentary(output_path, clip, i)
             selected_preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
             add_music(output_path, clip, i, selected_preset)
+            try:
+                quality_result = validate_output(output_path, o, clip[1] - clip[0])
+            except Exception:
+                # Never leave a failed export in the upload directory.
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                raise
+            quality_results.append(quality_result)
             made += 1
             thumb = f"out/{o}/thumb_{i}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i",
@@ -742,6 +806,8 @@ for i, clip in enumerate(clips, 1):
                  f"Hashtags: {clip[4]}\nScore: {clip[5]}\n")
 
 open("out/titles.txt", "w", encoding="utf-8").write("\n".join(lines))
+with open("out/quality_report.json", "w", encoding="utf-8") as quality_file:
+    json.dump(quality_results, quality_file, ensure_ascii=False, indent=2)
 with open("out/metadata.json", "w", encoding="utf-8") as metadata:
     json.dump([
         {"clip": i, "start": c[0], "end": c[1], "title": c[2],

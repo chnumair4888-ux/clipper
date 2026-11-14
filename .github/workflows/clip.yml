@@ -1,5 +1,12 @@
 name: Clipper
 
+permissions:
+  contents: read
+
+concurrency:
+  group: clipper-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -88,6 +95,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow uroman
 
+      - name: Check Python syntax
+        run: python -m py_compile clipper.py
+
+      - name: Test workflow safeguards
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
       - name: Run clipper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -109,6 +122,33 @@ jobs:
         run: |
           python clipper.py
 
+      - name: Verify validated outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s out/quality_report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report_path = Path("out/quality_report.json")
+          results = json.loads(report_path.read_text(encoding="utf-8"))
+          if not isinstance(results, list) or not results:
+              raise SystemExit("No validated clips were produced")
+          for item in results:
+              if item.get("status") != "passed":
+                  raise SystemExit("Quality report contains a non-passing item")
+              path = Path(item.get("file", ""))
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"Validated output is missing or empty: {path}")
+          actual = list(Path("out").rglob("*.mp4"))
+          if len(actual) != len(results):
+              raise SystemExit(
+                  f"MP4/report count mismatch: {len(actual)} files, {len(results)} report entries"
+              )
+          print(f"Verified {len(results)} validated MP4 file(s).")
+          PY
+
       - name: Upload clips to Oracle
         if: success()
         env:
@@ -118,18 +158,24 @@ jobs:
           set -euo pipefail
           test -n "$ORACLE_UPLOAD_URL"
           test -n "$ORACLE_UPLOAD_TOKEN"
-          find out -type f -name '*.mp4' -print0 | while IFS= read -r -d '' file; do
+          mapfile -d '' files < <(find out -type f -name '*.mp4' -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No MP4 files available for upload."
+            exit 1
+          fi
+          for file in "${files[@]}"; do
             name="${file#out/}"
             name="${name//\//_}"
             echo "Uploading $name"
             curl --fail --show-error --silent \
-              --retry 2 \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              --connect-timeout 20 --max-time 900 \
               -X POST "$ORACLE_UPLOAD_URL/upload/$name" \
               -H "Authorization: Bearer $ORACLE_UPLOAD_TOKEN" \
               -H "Content-Type: video/mp4" \
               --data-binary @"$file"
             echo
-            echo "Public URL: $ORACLE_UPLOAD_URL/files/$name"
+            echo "Uploaded: $name"
           done
 
       - uses: actions/upload-artifact@v4

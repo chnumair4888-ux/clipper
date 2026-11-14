@@ -39,7 +39,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ ref: 'main', inputs: { url: $json.body.url, clips: String($json.body.clips || 1), orientation: $json.body.orientation || 'vertical', length: $json.body.length || 'short', captions: $json.body.captions || 'words', background: $json.body.background || 'blur', language: $json.body.language || 'auto', edit_style: $json.body.edit_style || 'viral', audio_mode: $json.body.audio_mode || 'original', voice_language: $json.body.voice_language || 'en', voice_gender: $json.body.voice_gender || 'male', title_overlay: 'yes', brand: $json.body.brand || '', range: $json.body.range || '' } }) }}",
+        "jsonBody": "={{ JSON.stringify({ ref: 'main', inputs: { url: $json.body.url, clips: String($json.body.clips || 1), orientation: $json.body.orientation || 'vertical', length: $json.body.length || 'short', captions: $json.body.captions || 'words', background: $json.body.background || 'blur', language: $json.body.language || 'English', edit_style: $json.body.edit_style || 'viral', audio_mode: $json.body.audio_mode || 'original', voice_language: $json.body.voice_language || 'en', voice_gender: $json.body.voice_gender || 'auto', title_overlay: 'yes', brand: $json.body.brand || '', range: $json.body.range || '' } }) }}",
         "options": {}
       },
       "id": "github-dispatch",
