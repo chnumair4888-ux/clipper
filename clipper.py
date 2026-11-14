@@ -290,7 +290,8 @@ if clips and (CAPS != "none" or AUDIO_MODE != "original"):
                                check=True, timeout=120)
                 segments, info = model.transcribe(
                     audio_path, language=None if LANG == "auto" else LANG,
-                    vad_filter=False, word_timestamps=True, beam_size=3,\n                    condition_on_previous_text=False)
+                    vad_filter=False, word_timestamps=True, beam_size=3,
+                    condition_on_previous_text=False)
                 for segment in segments:
                     segs.append((s + segment.start, s + segment.end, segment.text.strip()))
                     for word in segment.words or []:
