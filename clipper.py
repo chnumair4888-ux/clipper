@@ -22,20 +22,34 @@ def run(cmd):
     subprocess.run(cmd, check=True)
 
 
+def write_cookies():
+    raw = E("YT_COOKIES") or ""
+    fixed = []
+    for ln in raw.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if ln.startswith("#"):
+            fixed.append(ln)
+        else:
+            fixed.append("\t".join(ln.split()))
+    if not fixed:
+        return False
+    with open("cookies.txt", "w") as f:
+        f.write("\n".join(fixed) + "\n")
+    return True
+
+
 # 1. Download
 if "drive.google.com" in URL:
     run(["gdown", "--fuzzy", URL, "-O", "video.mp4"])
 else:
-        cmd = ["yt-dlp", "--js-runtimes", "node", "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+    cmd = ["yt-dlp", "--js-runtimes", "node",
+           "-f", "bv*[height<=720]+ba/b[height<=720]/b",
            "--merge-output-format", "mp4", "-o", "video.mp4"]
-        if E("YT_COOKIES"):
-        fixed = []
-        for ln in E("YT_COOKIES").splitlines():
-            ln = ln.strip()
-            if ln:
-                fixed.append(ln if ln.startswith("#") else "\t".join(ln.split()))
-        open("cookies.txt", "w").write("\n".join(fixed) + "\n")
+    if write_cookies():
         cmd += ["--cookies", "cookies.txt"]
+    run(cmd + [URL])
 
 # 1b. Optional range (minutes), e.g. "10-40"
 if "-" in RANGE:
