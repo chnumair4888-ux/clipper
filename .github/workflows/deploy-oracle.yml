@@ -1,0 +1,77 @@
+name: Deploy Clipper Code to Oracle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Safely sync main to Oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate deployment settings
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" || { echo "Missing ORACLE_HOST secret"; exit 1; }
+          test -n "$ORACLE_USER" || { echo "Missing ORACLE_USER secret"; exit 1; }
+          test -n "$ORACLE_SSH_KEY" || { echo "Missing ORACLE_SSH_KEY secret"; exit 1; }
+          test -n "$ORACLE_KNOWN_HOSTS" || { echo "Missing ORACLE_KNOWN_HOSTS secret"; exit 1; }
+
+      - name: Connect and deploy safely
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+          ORACLE_SSH_PORT: ${{ secrets.ORACLE_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          PORT="${ORACLE_SSH_PORT:-22}"
+
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="/home/ubuntu/clipper"
+
+          test -d "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
+          git rev-parse --is-inside-work-tree >/dev/null
+
+          # Never overwrite tracked server-side edits.
+          if ! git diff --quiet HEAD --; then
+            echo "Deployment stopped: tracked local changes exist in $DEPLOY_PATH"
+            exit 1
+          fi
+
+          BACKUP_ROOT="$HOME/clipper-deploy-backups"
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          BACKUP_DIR="$BACKUP_ROOT/$STAMP"
+          mkdir -p "$BACKUP_DIR"
+          git archive HEAD | tar -x -C "$BACKUP_DIR"
+
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 -m py_compile clipper.py
+
+          echo "Deployment sync and Python syntax check completed."
+          echo "Backup saved at: $BACKUP_DIR"
+          REMOTE
+
+      - name: Deployment summary
+        if: success()
+        run: echo "Oracle code sync completed. No services were restarted."
