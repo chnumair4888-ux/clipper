@@ -313,6 +313,15 @@ def render(i, clip, orient):
               "funny": "eq=saturation=1.15",
               "esports": "eq=contrast=1.12:saturation=1.18"}
     chain.append(grades[preset])
+    # Subtle motion/punch-in for action-heavy presets.
+    if preset in ("viral", "funny", "esports"):
+        zoom = 1.10 if preset == "esports" else 1.06
+        zw, zh = int(W * zoom) // 2 * 2, int(H * zoom) // 2 * 2
+        chain.append(
+            f"scale={zw}:{zh},crop={W}:{H}:"
+            "x='(in_w-out_w)/2+(in_w-out_w)*0.15*sin(t*1.4)':"
+            "y='(in_h-out_h)/2+(in_h-out_h)*0.10*sin(t*1.1)'"
+        )
     if TITLE_ON and vert:
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
             file.write(textwrap.fill(title.upper(), 20))
@@ -370,6 +379,13 @@ for i, clip in enumerate(clips, 1):
                  f"Hashtags: {clip[4]}\nScore: {clip[5]}\n")
 
 open("out/titles.txt", "w", encoding="utf-8").write("\n".join(lines))
+with open("out/metadata.json", "w", encoding="utf-8") as metadata:
+    json.dump([
+        {"clip": i, "start": c[0], "end": c[1], "title": c[2],
+         "description": c[3], "hashtags": c[4], "score": c[5],
+         "style": STYLE, "audio": "original"}
+        for i, c in enumerate(clips, 1)
+    ], metadata, ensure_ascii=False, indent=2)
 note(f"Clips made: {made}")
 with open("out/report.txt", "w", encoding="utf-8") as file:
     file.write("\n".join(report) + "\n")
