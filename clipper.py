@@ -375,7 +375,7 @@ def animated_captions(path, start, end, vertical):
             caption = " ".join(w[2] for w in group)
             caption = caption.replace("\\", "").replace("{", "(").replace("}", ")")
             caption = caption.replace("\\N", " ")
-            f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,{caption}\\n")
+            f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,{caption}\n")
     return len(groups)
 
 
