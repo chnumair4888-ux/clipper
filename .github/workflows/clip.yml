@@ -1,15 +1,18 @@
 name: Clipper
+
 on:
   workflow_dispatch:
     inputs:
       url:
         description: "Video link"
         required: true
+        type: string
       clips:
-        description: "Kitne clips"
+        description: "Number of clips"
         default: "5"
+        type: string
       orientation:
-        description: "Shape"
+        description: "Video shape"
         type: choice
         default: vertical
         options: [vertical, horizontal, both]
@@ -24,85 +27,91 @@ on:
         default: words
         options: [words, lines, none]
       background:
-        description: "Vertical background"
+        description: "Background"
         type: choice
         default: blur
         options: [blur, crop, black]
       language:
-        description: "Video language"
+        description: "Language"
         type: choice
         default: auto
         options: [auto, en, ur, hi]
       edit_style:
-        description: "Gaming edit preset"
+        description: "Editing style"
         type: choice
         default: auto
         options: [auto, viral, cinematic, funny, esports]
       audio_mode:
-        description: "Audio (AI commentary is experimental)"
+        description: "Audio mode"
         type: choice
         default: original
         options: [original, auto, commentary]
       voice_language:
-        description: "AI commentary language"
+        description: "Voice language"
         type: choice
         default: en
         options: [en, roman_urdu, hi]
       voice_gender:
-        description: "AI voice gender"
+        description: "Voice gender"
         type: choice
         default: auto
         options: [auto, male, female]
       title_overlay:
-        description: "Title on top"
+        description: "Title overlay"
         type: choice
         default: "yes"
         options: ["yes", "no"]
       brand:
-        description: "Channel name watermark (optional)"
+        description: "Channel name"
         required: false
+        type: string
       range:
-        description: "Only these minutes e.g. 10-40 (optional)"
+        description: "Video minutes range"
         required: false
+        type: string
+
 jobs:
   clip:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core
-          pip install -U yt-dlp gdown faster-whisper requests edge-tts pillow
-      - name: Run
+          python -m pip install --upgrade pip
+          python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow
+
+      - name: Run clipper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          VIDEO_URL: ${{ github.event.inputs.url }}
-          NUM_CLIPS: ${{ github.event.inputs.clips }}
-          ORIENT: ${{ github.event.inputs.orientation }}
-          LENGTH: ${{ github.event.inputs.length }}
-          CAPS: ${{ github.event.inputs.captions }}
-          BG: ${{ github.event.inputs.background }}
-          LANG_CODE: ${{ github.event.inputs.language }}
-          EDIT_STYLE: ${{ github.event.inputs.edit_style }}
-          AUDIO_MODE: ${{ github.event.inputs.audio_mode }}
-          VOICE_LANG: ${{ github.event.inputs.voice_language }}
-          VOICE_GENDER: ${{ github.event.inputs.voice_gender }}
-          TITLE_ON: ${{ github.event.inputs.title_overlay }}
-          BRAND: ${{ github.event.inputs.brand }}
-          RANGE: ${{ github.event.inputs.range }}
+          VIDEO_URL: ${{ inputs.url }}
+          NUM_CLIPS: ${{ inputs.clips }}
+          ORIENT: ${{ inputs.orientation }}
+          LENGTH: ${{ inputs.length }}
+          CAPS: ${{ inputs.captions }}
+          BG: ${{ inputs.background }}
+          LANG_CODE: ${{ inputs.language }}
+          EDIT_STYLE: ${{ inputs.edit_style }}
+          AUDIO_MODE: ${{ inputs.audio_mode }}
+          VOICE_LANG: ${{ inputs.voice_language }}
+          VOICE_GENDER: ${{ inputs.voice_gender }}
+          TITLE_ON: ${{ inputs.title_overlay }}
+          BRAND: ${{ inputs.brand }}
+          RANGE: ${{ inputs.range }}
         run: |
-          ls -la
-          F=$(find . -iname 'clipper.py*' -not -path './.git/*' | head -1)
-          echo "Using: $F"
-          python "$F"
+          python clipper.py
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: clips
-          path: out
+          name: gaming-clips
+          path: out/
+          if-no-files-found: warn
