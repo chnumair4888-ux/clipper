@@ -132,6 +132,44 @@ jobs:
             echo "Public URL: $ORACLE_UPLOAD_URL/files/$name"
           done
 
+      - name: Create and upload clips manifest
+        if: success()
+        env:
+          ORACLE_UPLOAD_URL: ${{ secrets.ORACLE_UPLOAD_URL }}
+          ORACLE_UPLOAD_TOKEN: ${{ secrets.ORACLE_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob
+          import json
+          import os
+          import re
+
+          base = os.environ["ORACLE_UPLOAD_URL"].rstrip("/")
+          files = sorted(glob.glob("out/*.mp4"))
+          clips = []
+          for path in files:
+              name = os.path.basename(path)
+              safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+              clips.append({
+                  "filename": safe_name,
+                  "video_url": f"{base}/files/{safe_name}"
+              })
+          if not clips:
+              raise SystemExit("No MP4 clips found; refusing to publish an empty manifest")
+          with open("out/manifest.json", "w", encoding="utf-8") as f:
+              json.dump({"clips": clips}, f, ensure_ascii=False, indent=2)
+          print(f"Manifest created with {len(clips)} clips")
+          PY
+          curl --fail --show-error --silent \
+            --retry 2 \
+            -X POST "$ORACLE_UPLOAD_URL/upload/manifest.json" \
+            -H "Authorization: Bearer $ORACLE_UPLOAD_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @out/manifest.json
+          echo
+          echo "Manifest URL: $ORACLE_UPLOAD_URL/files/manifest.json"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
