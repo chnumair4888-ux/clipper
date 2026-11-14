@@ -349,9 +349,14 @@ def render(i, clip, orient):
                          f"Shadow=0,Alignment=2,MarginV={mv}{col}'")
     fc = base + ";[v0]" + ",".join(chain or ["null"]) + "[v]"
     out = f"out/{orient}/clip_{i}.mp4"
+    audio_present = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "csv=p=0", "video.mp4"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    audio_opts = (["-map", "0:a:0", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]
+                  if audio_present else [])
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
-         "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
-         "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+         "-filter_complex", fc, "-map", "[v]", *audio_opts,
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out])
 
