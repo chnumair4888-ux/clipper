@@ -109,6 +109,28 @@ jobs:
         run: |
           python clipper.py
 
+      - name: Upload clips to Oracle
+        if: success()
+        env:
+          ORACLE_UPLOAD_URL: ${{ secrets.ORACLE_UPLOAD_URL }}
+          ORACLE_UPLOAD_TOKEN: ${{ secrets.ORACLE_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_UPLOAD_URL"
+          test -n "$ORACLE_UPLOAD_TOKEN"
+          find out -type f -name '*.mp4' -print0 | while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            echo "Uploading $name"
+            curl --fail --show-error --silent \
+              --retry 2 \
+              -X POST "$ORACLE_UPLOAD_URL/upload/$name" \
+              -H "Authorization: Bearer $ORACLE_UPLOAD_TOKEN" \
+              -H "Content-Type: video/mp4" \
+              --data-binary @"$file"
+            echo
+            echo "Public URL: $ORACLE_UPLOAD_URL/files/$name"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
