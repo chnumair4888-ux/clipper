@@ -26,8 +26,12 @@ def run(cmd):
 if "drive.google.com" in URL:
     run(["gdown", "--fuzzy", URL, "-O", "video.mp4"])
 else:
-    run(["yt-dlp", "-f", "bv*[height<=720]+ba/b[height<=720]/b",
-         "--merge-output-format", "mp4", "-o", "video.mp4", URL])
+        cmd = ["yt-dlp", "--js-runtimes", "node", "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+           "--merge-output-format", "mp4", "-o", "video.mp4"]
+    if E("YT_COOKIES"):
+        open("cookies.txt", "w").write(E("YT_COOKIES"))
+        cmd += ["--cookies", "cookies.txt"]
+    run(cmd + [URL])
 
 # 1b. Optional range (minutes), e.g. "10-40"
 if "-" in RANGE:
