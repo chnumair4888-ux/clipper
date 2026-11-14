@@ -61,6 +61,7 @@ jobs:
       - name: Run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
           VIDEO_URL: ${{ github.event.inputs.url }}
           NUM_CLIPS: ${{ github.event.inputs.clips }}
           ORIENT: ${{ github.event.inputs.orientation }}
