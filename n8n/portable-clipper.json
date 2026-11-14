@@ -1,0 +1,74 @@
+{
+  "name": "Portable Gaming Clipper Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gaming-clipper",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "clipper-webhook",
+      "name": "Submit Video",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "gaming-clipper-portable"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/chnumair4888-ux/clipper/actions/workflows/clip.yml/dispatches",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ref: 'main', inputs: { url: $json.body.url, clips: String($json.body.clips || 1), orientation: $json.body.orientation || 'vertical', length: $json.body.length || 'short', captions: $json.body.captions || 'words', background: $json.body.background || 'blur', language: $json.body.language || 'auto', edit_style: $json.body.edit_style || 'viral', audio_mode: $json.body.audio_mode || 'original', voice_language: $json.body.voice_language || 'en', voice_gender: $json.body.voice_gender || 'male', title_overlay: 'yes', brand: $json.body.brand || '', range: $json.body.range || '' } }) }}",
+        "options": {}
+      },
+      "id": "github-dispatch",
+      "name": "Start GitHub Clipper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Submit Video": {
+      "main": [
+        [
+          {
+            "node": "Start GitHub Clipper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}
