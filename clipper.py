@@ -460,8 +460,9 @@ def ass_timestamp(seconds):
 
 
 def animated_captions(path, start, end, vertical):
+    # Larger, high-contrast captions with a karaoke fill color.
     width, height = (1080, 1920) if vertical else (1920, 1080)
-    font_size, bottom = (44, 170) if vertical else (36, 55)
+    font_size, bottom = (70, 300) if vertical else (48, 75)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -471,7 +472,7 @@ def animated_captions(path, start, end, vertical):
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,"
+        f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H0000D7FF,&H00000000,"
         f"&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,50,50,{bottom},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
@@ -479,7 +480,7 @@ def animated_captions(path, start, end, vertical):
     visible = [w for w in words if w[1] > start and w[0] < end]
     groups, current = [], []
     for word in visible:
-        if current and (len(current) >= 5 or word[0] - current[-1][1] > 0.65):
+        if current and (len(current) >= 4 or word[0] - current[-1][1] > 0.65):
             groups.append(current)
             current = []
         current.append(word)
@@ -492,9 +493,19 @@ def animated_captions(path, start, end, vertical):
             b = min(end - start, max(group[-1][1] - start, a + 0.65))
             if b <= a:
                 continue
-            caption = " ".join(w[2] for w in group)
-            caption = caption.replace("\\", "").replace("{", "(").replace("}", ")")
-            caption = caption.replace("\\N", " ")
+            karaoke = []
+            for index, word in enumerate(group):
+                word_start = max(start, word[0])
+                word_end = min(end, word[1])
+                if index + 1 < len(group):
+                    next_start = max(word_end, min(end, group[index + 1][0]))
+                else:
+                    next_start = word_end
+                duration_cs = max(1, min(600, round((next_start - word_start) * 100)))
+                clean = str(word[2]).replace("\\", "").replace("{", "(").replace("}", ")")
+                clean = clean.replace("\\N", " ")
+                karaoke.append(f"{{\\kf{duration_cs}}}{clean}")
+            caption = " ".join(karaoke)
             f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,{caption}\n")
     return len(groups)
 
