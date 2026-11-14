@@ -460,8 +460,9 @@ def ass_timestamp(seconds):
 
 
 def animated_captions(path, start, end, vertical):
+    # Larger, high-contrast captions with a karaoke fill color.
     width, height = (1080, 1920) if vertical else (1920, 1080)
-    font_size, bottom = (44, 170) if vertical else (36, 55)
+    font_size, bottom = (70, 300) if vertical else (48, 75)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -471,7 +472,7 @@ def animated_captions(path, start, end, vertical):
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,"
+        f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H0000D7FF,&H00000000,"
         f"&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,50,50,{bottom},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
@@ -479,7 +480,7 @@ def animated_captions(path, start, end, vertical):
     visible = [w for w in words if w[1] > start and w[0] < end]
     groups, current = [], []
     for word in visible:
-        if current and (len(current) >= 5 or word[0] - current[-1][1] > 0.65):
+        if current and (len(current) >= 4 or word[0] - current[-1][1] > 0.65):
             groups.append(current)
             current = []
         current.append(word)
@@ -492,9 +493,19 @@ def animated_captions(path, start, end, vertical):
             b = min(end - start, max(group[-1][1] - start, a + 0.65))
             if b <= a:
                 continue
-            caption = " ".join(w[2] for w in group)
-            caption = caption.replace("\\", "").replace("{", "(").replace("}", ")")
-            caption = caption.replace("\\N", " ")
+            karaoke = []
+            for index, word in enumerate(group):
+                word_start = max(start, word[0])
+                word_end = min(end, word[1])
+                if index + 1 < len(group):
+                    next_start = max(word_end, min(end, group[index + 1][0]))
+                else:
+                    next_start = word_end
+                duration_cs = max(1, min(600, round((next_start - word_start) * 100)))
+                clean = str(word[2]).replace("\\", "").replace("{", "(").replace("}", ")")
+                clean = clean.replace("\\N", " ")
+                karaoke.append(f"{{\\kf{duration_cs}}}{clean}")
+            caption = " ".join(karaoke)
             f.write(f"Dialogue: 0,{ass_timestamp(a)},{ass_timestamp(b)},Pop,,0,0,0,,{caption}\n")
     return len(groups)
 
@@ -525,14 +536,15 @@ def render(i, clip, orient):
               "funny": "eq=saturation=1.15",
               "esports": "eq=contrast=1.12:saturation=1.18"}
     chain.append(grades[preset])
-    # Subtle motion/punch-in for action-heavy presets.
-    if False:  # Disable distracting automatic gameplay zoom
-        zoom = 1.10 if preset == "esports" else 1.06
+    # Restrained punch-in for high-confidence highlights only.
+    # This is a gentle editorial effect, not AI event tracking or smart reframing.
+    if vert and clip[5] >= 8 and preset in ("viral", "esports", "cinematic"):
+        zoom = {"viral": 1.035, "esports": 1.05, "cinematic": 1.025}[preset]
         zw, zh = int(W * zoom) // 2 * 2, int(H * zoom) // 2 * 2
         chain.append(
             f"scale={zw}:{zh},crop={W}:{H}:"
-            "x='(in_w-out_w)/2+(in_w-out_w)*0.15*sin(t*1.4)':"
-            "y='(in_h-out_h)/2+(in_h-out_h)*0.10*sin(t*1.1)'"
+            "x='(in_w-out_w)/2+(in_w-out_w)*0.035*sin(t*0.7)':"
+            "y='(in_h-out_h)/2+(in_h-out_h)*0.025*sin(t*0.55)'"
         )
     if TITLE_ON and vert and not title.lower().startswith(("clip ", "video highlight")):
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
@@ -559,6 +571,15 @@ def render(i, clip, orient):
             chain.append(f"subtitles=c{i}.srt:original_size={W}x{H}:"
                          f"force_style='FontName={FONT},FontSize={fs},Bold=1,Outline=5,"
                          f"Shadow=0,Alignment=2,MarginV={mv}{col}'")
+    # Short, subtle video fades make clip boundaries feel intentional.
+    clip_duration = max(0.0, e - s)
+    fade_duration = min(0.18, clip_duration / 4)
+    if fade_duration > 0:
+        fade_out_start = max(0.0, clip_duration - fade_duration)
+        chain.append(
+            f"fade=t=in:st=0:d={fade_duration:.3f},"
+            f"fade=t=out:st={fade_out_start:.3f}:d={fade_duration:.3f}"
+        )
     fc = base + ";[v0]" + ",".join(chain or ["null"]) + "[v]"
     out = f"out/{orient}/clip_{i}.mp4"
     audio_present = subprocess.run(
