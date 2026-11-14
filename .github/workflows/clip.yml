@@ -33,6 +33,26 @@ on:
         type: choice
         default: auto
         options: [auto, en, ur, hi]
+      edit_style:
+        description: "Gaming edit preset"
+        type: choice
+        default: auto
+        options: [auto, viral, cinematic, funny, esports]
+      audio_mode:
+        description: "Audio (commentary coming later)"
+        type: choice
+        default: original
+        options: [original, auto, commentary]
+      voice_language:
+        description: "Future AI commentary language"
+        type: choice
+        default: en
+        options: [en, roman_urdu, hi]
+      voice_gender:
+        description: "Future AI voice"
+        type: choice
+        default: auto
+        options: [auto, male, female]
       title_overlay:
         description: "Title on top"
         type: choice
@@ -69,6 +89,10 @@ jobs:
           CAPS: ${{ github.event.inputs.captions }}
           BG: ${{ github.event.inputs.background }}
           LANG_CODE: ${{ github.event.inputs.language }}
+          EDIT_STYLE: ${{ github.event.inputs.edit_style }}
+          AUDIO_MODE: ${{ github.event.inputs.audio_mode }}
+          VOICE_LANG: ${{ github.event.inputs.voice_language }}
+          VOICE_GENDER: ${{ github.event.inputs.voice_gender }}
           TITLE_ON: ${{ github.event.inputs.title_overlay }}
           BRAND: ${{ github.event.inputs.brand }}
           RANGE: ${{ github.event.inputs.range }}
