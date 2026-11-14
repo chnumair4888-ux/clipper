@@ -44,7 +44,7 @@ def write_cookies():
 if "drive.google.com" in URL:
     run(["gdown", "--fuzzy", URL, "-O", "video.mp4"])
 else:
-    cmd = ["yt-dlp", "--js-runtimes", "node",
+    cmd = ["yt-dlp", "--js-runtimes", "node", "--remote-components", "ejs:github",
            "-f", "bv*[height<=720]+ba/b[height<=720]/b",
            "--merge-output-format", "mp4", "-o", "video.mp4"]
     if write_cookies():
