@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Clipper - TikTok connection</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f0f14;color:#f2f2f7;line-height:1.5}
+  main{max-width:520px;margin:0 auto;padding:28px 18px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:#9a9aa8;margin:0 0 20px;font-size:14px}
+  .card{background:#1a1a23;border:1px solid #2b2b38;border-radius:14px;padding:16px;margin:14px 0}
+  .ok{border-color:#2f7d4f}.bad{border-color:#a33b3b}
+  label{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#9a9aa8;margin-bottom:6px}
+  textarea{width:100%;box-sizing:border-box;background:#0f0f14;color:#f2f2f7;border:1px solid #33334a;border-radius:10px;padding:10px;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;resize:none}
+  button{margin-top:8px;background:#fe2c55;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:15px;font-weight:600}
+  small{color:#9a9aa8;display:block;margin-top:8px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Clipper</h1>
+  <p class="sub">TikTok connection</p>
+  <div id="out"></div>
+</main>
+<script>
+(function () {
+  var out = document.getElementById("out");
+  var p = new URLSearchParams(window.location.search);   // values are already URL-decoded here
+  var code = p.get("code"), state = p.get("state"), err = p.get("error");
+
+  function card(cls, html) {
+    var d = document.createElement("div");
+    d.className = "card " + cls;
+    d.innerHTML = html;
+    out.appendChild(d);
+    return d;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  }
+  function field(title, value) {
+    var d = card("", '<label>' + esc(title) + '</label><textarea readonly rows="3"></textarea>' +
+      '<button type="button">Copy ' + esc(title.toLowerCase()) + '</button>');
+    var ta = d.querySelector("textarea"), btn = d.querySelector("button");
+    ta.value = value;
+    btn.addEventListener("click", function () {
+      ta.select();
+      var done = function () { btn.textContent = "Copied"; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(done, function () { document.execCommand("copy"); done(); });
+      } else { document.execCommand("copy"); done(); }
+    });
+  }
+
+  if (err) {
+    card("bad", "<b>TikTok did not authorize the connection.</b><br>Reason: " + esc(err) +
+      (p.get("error_description") ? " - " + esc(p.get("error_description")) : "") +
+      "<small>You can close this page and start again from the Clipper dashboard.</small>");
+  } else if (code && state) {
+    card("ok", "<b>Authorization complete.</b><br>Copy the two values below into the Clipper dashboard (TikTok connection box) to finish connecting your account." +
+      "<small>The code works once and expires within minutes. Do not share it with anyone.</small>");
+    field("Code", code);
+    field("State", state);
+  } else {
+    card("", "This is the redirect page used after you approve Clipper on TikTok. " +
+      "Open it through the <b>Connect TikTok</b> button in the Clipper dashboard.");
+  }
+  // remove the one-time code from the address bar / browser history
+  if (window.history && history.replaceState && (code || state || err)) {
+    history.replaceState(null, "", window.location.pathname);
+  }
+})();
+</script>
+</body>
+</html>
