@@ -20,7 +20,7 @@ if CAPS not in ("words", "lines", "none"):
 LAYOUT = (E("LAYOUT") or "auto").lower()
 if LAYOUT not in ("auto", "split", "fit", "crop"):
     LAYOUT = "auto"
-BG = (E("BG") or "blur").lower()()
+BG = (E("BG") or "blur").lower()
 if BG not in ("blur", "crop", "black"):
     BG = "blur"
 LANG_RAW = (E("LANG_CODE") or "English").strip().lower()
@@ -649,7 +649,7 @@ def render(i, clip, orient):
                   if audio_present else [])
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
          "-filter_complex", fc, "-map", "[v]", *audio_opts,
-         "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p",
+         " -c:v", "libx264", "-preset", "medium", "-crf", "17", "-b:v", "6M", "-maxrate", "8M", "-bufsize", "12M", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out])
 
 
