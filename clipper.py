@@ -649,7 +649,7 @@ def render(i, clip, orient):
                   if audio_present else [])
     run(["ffmpeg", "-y", "-ss", str(s), "-i", "video.mp4", "-t", str(e - s),
          "-filter_complex", fc, "-map", "[v]", *audio_opts,
-         " -c:v", "libx264", "-preset", "medium", "-crf", "17", "-b:v", "6M", "-maxrate", "8M", "-bufsize", "12M", "-pix_fmt", "yuv420p",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-b:v", "6M", "-maxrate", "8M", "-bufsize", "12M", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out])
 
 
