@@ -1,0 +1,2 @@
+# Optional gaming glossary. Format: misheard => correct
+# Add one term per line for prompt/hotwords, or a correction mapping.
