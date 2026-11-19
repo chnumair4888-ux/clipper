@@ -530,23 +530,63 @@ def animated_captions(path, start, end, vertical):
 
 
 # 5. Render
+def detect_layout():
+    if LAYOUT in ("split", "fit", "crop"):
+        note(f"Layout selected: {LAYOUT} (explicit override)")
+        return LAYOUT, None
+    try:
+        import cv2
+        import numpy as np
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        boxes = []
+        sampled = 0
+        for t in [dur * x / 9 for x in range(1, 9)]:
+            frame = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", "video.mp4", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"], capture_output=True, check=True, timeout=20).stdout
+            image = cv2.imdecode(np.frombuffer(frame, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if image is None:
+                continue
+            sampled += 1
+            faces = cascade.detectMultiScale(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 1.1, 5, minSize=(max(40, image.shape[1]//12), max(40, image.shape[0]//12)))
+            if len(faces):
+                boxes.append(max(faces, key=lambda b: b[2]*b[3]))
+        if sampled and len(boxes)/sampled >= 0.6:
+            # Median face rectangle across samples; pad around the head.
+            box = tuple(int(np.median([b[k] for b in boxes])) for k in range(4))
+            note(f"Layout selected: split (face detected in {len(boxes)}/{sampled} samples)")
+            return "split", box
+        note(f"Layout selected: fit (face detection {len(boxes)}/{sampled} samples below threshold)")
+        return "fit", None
+    except Exception as exc:
+        note(f"Layout selected: fit (face detection unavailable: {type(exc).__name__})")
+        return "fit", None
+
+LAYOUT_RESULT, FACE_BOX = detect_layout()
+
 def render(i, clip, orient):
     s, e, title = clip[0], clip[1], clip[2]
     vert = orient == "vertical"
     W, H = (1080, 1920) if vert else (1920, 1080)
     os.makedirs(f"out/{orient}", exist_ok=True)
+    layout = LAYOUT_RESULT if vert else "fit"
     if not vert:
         base = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black[v0]")
-    elif BG == "crop":
+    elif layout == "split" and FACE_BOX:
+        x, y, fw, fh = FACE_BOX
+        source_w = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0", "video.mp4").decode().strip())
+        source_h = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", "video.mp4").decode().strip())
+        pad = int(max(fw, fh) * 0.7)
+        x, y = max(0, x-pad), max(0, y-pad)
+        fw, fh = min(source_w-x, fw+2*pad), min(source_h-y, fh+2*pad)
+        base = (f"[0:v]split[a][b];[a]crop={fw}:{fh}:{x}:{y},scale=1080:960[top];"
+                f"[b]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[game];"
+                "[top][game]vstack[v0]")
+    elif layout == "crop" or BG == "crop":
         base = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[v0]"
-    elif BG == "black":
-        base = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black[v0]")
     else:
         base = (f"[0:v]split[a][b];"
                 f"[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:5[bg];"
-                f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
+                f"[b]scale={W}:960:force_original_aspect_ratio=decrease[fg];"
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v0]")
     chain = []
     preset = STYLE if STYLE != "auto" else ("esports" if clip[5] >= 8 else "viral")
