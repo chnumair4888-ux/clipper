@@ -17,7 +17,10 @@ if LENGTH not in ("short", "medium", "long"):
 CAPS = (E("CAPS") or "words").lower()
 if CAPS not in ("words", "lines", "none"):
     CAPS = "words"
-BG = (E("BG") or "blur").lower()
+LAYOUT = (E("LAYOUT") or "auto").lower()
+if LAYOUT not in ("auto", "split", "fit", "crop"):
+    LAYOUT = "auto"
+BG = (E("BG") or "blur").lower()()
 if BG not in ("blur", "crop", "black"):
     BG = "blur"
 LANG_RAW = (E("LANG_CODE") or "English").strip().lower()
@@ -81,7 +84,7 @@ if "drive.google.com" in URL:
     run(["gdown", "--fuzzy", URL, "-O", "video.mp4"])
 else:
     cmd = ["yt-dlp", "--js-runtimes", "node", "--remote-components", "ejs:github",
-           "-f", "bv*[height<=1080]+ba/b[height<=1080]/b",
+           "-f", "bv*[height<=1080]+ba/b",
            "--merge-output-format", "mp4", "-o", "video.mp4"]
     if write_cookies():
         cmd += ["--cookies", "cookies.txt"]
@@ -122,7 +125,7 @@ def transcribe_full_video():
             check=True, timeout=900
         )
 
-        size = "base" if LANG == "roman_urdu" else "tiny"
+        size = "small"
         note(f"Full-video Whisper model: {size}; language: {LANG}")
         model = WhisperModel(size, device="cpu", compute_type="int8")
 
@@ -134,10 +137,10 @@ def transcribe_full_video():
         segments, info = model.transcribe(
             audio_path,
             language="ur" if LANG == "roman_urdu" else "en",
-            task="transcribe" if LANG == "roman_urdu" else "translate",
+            task="transcribe",
             vad_filter=True,
             word_timestamps=True,
-            beam_size=3,
+            beam_size=5,
             condition_on_previous_text=False
         )
 
@@ -383,7 +386,7 @@ for candidate in valid_picks:
 
 note(f"Gemini picks received: {len(picks or [])}; valid non-overlapping clips: {len(clips)}")
 if not clips:
-    note("No valid Gemini picks; building fallback candidates")
+    note("No valid Gemini picks; scoring speech candidates (no timeline-from-zero fallback)")
     clip_length = min((LO + HI) / 2, dur)
     candidates = []
 
@@ -400,14 +403,10 @@ if not clips:
             t += 5
 
         if not candidates:
-            note("No speech detected in candidate windows; using timeline fallback")
+            raise SystemExit("Stage-1 candidate scoring failed: no speech candidate windows detected; refusing timeline fallback.")
 
     if not candidates:
-        step = max(clip_length, 1.0)
-        candidates = [
-            (0, i * step)
-            for i in range(max(1, int(dur // step)))
-        ]
+        raise SystemExit("Stage-1 candidate scoring failed; refusing to cut from video start.")
 
     candidates.sort(reverse=True)
 
@@ -453,7 +452,7 @@ def ts(x):
 
 
 def write_srt(path, s, e):
-    gsize = 5 if CAPS == "words" else 7
+    gsize = 3 if CAPS == "words" else 5
     ws = [w for w in words if w[1] > s and w[0] < e]
     groups, cur = [], []
     for w in ws:
@@ -482,7 +481,7 @@ def ass_timestamp(seconds):
 def animated_captions(path, start, end, vertical):
     # Larger, high-contrast captions with a karaoke fill color.
     width, height = (1080, 1920) if vertical else (1920, 1080)
-    font_size, bottom = (70, 300) if vertical else (48, 75)
+    font_size, bottom = (86, 320) if vertical else (48, 75)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
