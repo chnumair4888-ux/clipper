@@ -438,12 +438,8 @@ if not clips:
         if len(clips) >= N:
             break
 
-    if not clips and dur > 0:
-        clips = [(
-            0, dur, "Video Highlight",
-            "Highlight from the video",
-            "#shorts #highlights", 0
-        )]
+    if not clips:
+        raise SystemExit("No usable highlights selected; refusing to export a full-video fallback.")
 
     note(f"Fallback clips selected: {len(clips)}")
 
@@ -803,12 +799,15 @@ def validate_output(path, orient, expected_duration):
     actual_duration = float(data.get("format", {}).get("duration", 0) or 0)
     if actual_duration <= 0 or abs(actual_duration - expected_duration) > 1.5:
         raise RuntimeError(f"Output duration mismatch: {actual_duration:.2f}s")
+    bitrate = int(data.get("format", {}).get("bit_rate", 0) or 0)
+    if bitrate < 6000000:
+        raise RuntimeError(f"Output bitrate below 6 Mbps: {bitrate}")
     audio = any(x.get("codec_type") == "audio" for x in data.get("streams", []))
     return {
         "file": path, "video_codec": video.get("codec_name"),
         "pixel_format": video.get("pix_fmt"), "width": actual_size[0],
         "height": actual_size[1], "duration_seconds": round(actual_duration, 3),
-        "frame_rate": video.get("avg_frame_rate"),
+        "frame_rate": video.get("avg_frame_rate"), "bitrate": bitrate,
         "audio_present": audio, "status": "passed"
     }
 
