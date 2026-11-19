@@ -97,7 +97,7 @@ if "-" in RANGE:
         a, b = float(a or 0) * 60, float(b) * 60
         run(["ffmpeg", "-y", "-ss", str(a), "-i", "video.mp4", "-t", str(b - a),
              "-c", "copy", "trimmed.mp4"])
-        os.replace("trimmed.mp4", "video.mp4"])
+        os.replace("trimmed.mp4", "video.mp4")
     except Exception as ex:
         note(f"Range ignored: {ex}")
 
