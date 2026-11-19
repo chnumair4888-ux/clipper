@@ -97,13 +97,15 @@ if "-" in RANGE:
         a, b = float(a or 0) * 60, float(b) * 60
         run(["ffmpeg", "-y", "-ss", str(a), "-i", "video.mp4", "-t", str(b - a),
              "-c", "copy", "trimmed.mp4"])
-        os.replace("trimmed.mp4", "video.mp4")
+        os.replace("trimmed.mp4", "video.mp4"])
     except Exception as ex:
         note(f"Range ignored: {ex}")
 
-dur = float(subprocess.check_output(
-    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-     "-of", "csv=p=0", "video.mp4"]).decode().strip())
+source_probe = subprocess.check_output(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", "video.mp4"]).decode()
+source_info = json.loads(source_probe)
+source_video = next((st for st in source_info.get("streams", []) if st.get("codec_type") == "video"), {})
+dur = float(source_info.get("format", {}).get("duration", 0) or 0)
+note(f"Source ffprobe: {source_video.get('width')}x{source_video.get('height')} codec={source_video.get('codec_name')} duration={dur:.2f}s")
 
 
 # Transcribe the source video before highlight selection.
@@ -481,7 +483,7 @@ def ass_timestamp(seconds):
 def animated_captions(path, start, end, vertical):
     # Larger, high-contrast captions with a karaoke fill color.
     width, height = (1080, 1920) if vertical else (1920, 1080)
-    font_size, bottom = (86, 320) if vertical else (48, 75)
+    font_size, bottom = (86, 360) if vertical else (48, 75)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -499,7 +501,7 @@ def animated_captions(path, start, end, vertical):
     visible = [w for w in words if w[1] > start and w[0] < end]
     groups, current = [], []
     for word in visible:
-        if current and (len(current) >= 4 or word[0] - current[-1][1] > 0.65):
+        if current and (len(current) >= 3 or word[0] - current[-1][1] > 0.65):
             groups.append(current)
             current = []
         current.append(word)
@@ -521,7 +523,7 @@ def animated_captions(path, start, end, vertical):
                 else:
                     next_start = word_end
                 duration_cs = max(1, min(600, round((next_start - word_start) * 100)))
-                clean = str(word[2]).replace("\\", "").replace("{", "(").replace("}", ")")
+                clean = str(word[2]).upper().replace("\\", "").replace("{", "(").replace("}", ")")
                 clean = clean.replace("\\N", " ")
                 karaoke.append(f"{{\\kf{duration_cs}}}{clean}")
             caption = " ".join(karaoke)
@@ -573,7 +575,7 @@ def render(i, clip, orient):
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black[v0]")
     elif layout == "split" and FACE_BOX:
         x, y, fw, fh = FACE_BOX
-        source_w = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0", "video.mp4").decode().strip())
+        source_w = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0", "video.mp4"]).decode().strip())
         source_h = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", "video.mp4").decode().strip())
         pad = int(max(fw, fh) * 0.7)
         x, y = max(0, x-pad), max(0, y-pad)
@@ -606,18 +608,20 @@ def render(i, clip, orient):
             "y='(in_h-out_h)/2+(in_h-out_h)*0.025*sin(t*0.55)'"
         )
     if TITLE_ON and vert and not title.lower().startswith(("clip ", "video highlight")):
+        title_words = " ".join(title.upper().split()[:8])
         with open(f"t{i}.txt", "w", encoding="utf-8") as file:
-            file.write(textwrap.fill(title, 28))
-        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=32:fontcolor=white:"
-                     "borderw=3:bordercolor=black:line_spacing=6:x=(w-text_w)/2:y=90:"
-                     "enable='lt(t,2.8)'")
+            file.write(title_words)
+        chain.append("drawbox=x=0:y=180:w=1080:h=180:color=red@0.95:t=fill")
+        chain.append(f"drawtext=textfile=t{i}.txt:font='{FONT}':fontsize=64:fontcolor=white:"
+                      "borderw=3:bordercolor=black:x=(w-text_w)/2:y=235:"
+                      "enable='lt(t,2.8)'")
     if BRAND:
         with open("brand.txt", "w", encoding="utf-8") as file:
             file.write(BRAND)
         fs = 40 if vert else 34
         chain.append(f"drawtext=textfile=brand.txt:font='{FONT}':fontsize={fs}:"
                      "fontcolor=white@0.7:borderw=3:bordercolor=black@0.7:"
-                     "x=w-text_w-40:y=h-text_h-80")
+                     "x=130:y=h-text_h-360")
     if CAPS != "none" and has_caps[i]:
         if CAPS == "words":
             fs, col = (44, "") if vert else (36, "")
