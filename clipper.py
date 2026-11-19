@@ -1,4 +1,4 @@
-import os, json, subprocess, textwrap, requests, asyncio
+import os, json, subprocess, textwrap, requests, asyncio, difflib
 from faster_whisper import WhisperModel
 
 E = os.environ.get
@@ -113,6 +113,29 @@ note(f"Source ffprobe: {source_video.get('width')}x{source_video.get('height')} 
 note(f"Editing preset: {STYLE}; audio mode: {AUDIO_MODE}")
 transcript = ""
 segs, words = [], []
+GLOSSARY_PATH = "glossary.txt"
+glossary_terms, glossary_map = [], {}
+if os.path.exists(GLOSSARY_PATH):
+    for raw_line in open(GLOSSARY_PATH, encoding="utf-8"):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=>" in line:
+            wrong, right = [x.strip() for x in line.split("=>", 1)]
+            if wrong and right:
+                glossary_map[wrong.lower()] = right
+                glossary_terms.append(right)
+        else:
+            glossary_terms.append(line)
+
+def fix_glossary_word(text):
+    if not glossary_map:
+        return text
+    key = text.strip().lower()
+    if key in glossary_map:
+        return glossary_map[key]
+    close = difflib.get_close_matches(key, list(glossary_map), n=1, cutoff=0.86)
+    return glossary_map[close[0]] if close else text
 
 def transcribe_full_video():
     global transcript
@@ -143,12 +166,14 @@ def transcribe_full_video():
             vad_filter=True,
             word_timestamps=True,
             beam_size=5,
-            condition_on_previous_text=False
+            condition_on_previous_text=False,
+            initial_prompt=("Gaming terms: " + ", ".join(glossary_terms[:80])) if glossary_terms else None,
+            hotwords=" ".join(glossary_terms[:80]) if glossary_terms else None
         )
 
         transcript_lines = []
         for segment in segments:
-            segment_text = segment.text.strip()
+            segment_text = ' '.join(fix_glossary_word(w) for w in segment.text.strip().split())
             if romanizer:
                 segment_text = romanizer.romanize_string(
                     segment_text, lcode="urd"
@@ -164,7 +189,7 @@ def transcribe_full_video():
 
             for word in segment.words or []:
                 if word.word.strip() and word.start is not None and word.end is not None:
-                    word_text = word.word.strip()
+                    word_text = fix_glossary_word(word.word.strip())
                     if romanizer:
                         word_text = romanizer.romanize_string(
                             word_text, lcode="urd"
