@@ -1,0 +1,81 @@
+name: Quality-v2 Video QA
+on:
+  push:
+    branches: [quality-v2]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: facecam
+            url: https://youtu.be/U6OHtLt1x9U
+          - label: gameplay-no-facecam
+            url: https://youtu.be/NtlQVrFerVk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: quality-v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core
+          python -m pip install --upgrade pip
+          python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow uroman opencv-python-headless numpy
+      - name: Syntax and safeguard tests
+        run: |
+          python -m py_compile clipper.py
+          python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Run test video (minutes 10-25)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          VIDEO_URL: ${{ matrix.url }}
+          NUM_CLIPS: "1"
+          ORIENT: vertical
+          LENGTH: short
+          CAPS: words
+          BG: blur
+          LANG_CODE: English
+          EDIT_STYLE: auto
+          AUDIO_MODE: original
+          TITLE_ON: "yes"
+          RANGE: "10-25"
+        run: |
+          mkdir -p qa/${{ matrix.label }}
+          python clipper.py 2>&1 | tee qa/${{ matrix.label }}/run.log
+          cp out/quality_report.json qa/${{ matrix.label }}/quality_report.json
+          cp c0.ass qa/${{ matrix.label }}/captions.ass
+          CLIP="$(find out/vertical -name 'clip_*.mp4' | head -1)"
+          test -s "$CLIP"
+          ffprobe -v error -show_streams -show_format -of json "$CLIP" | tee qa/${{ matrix.label }}/ffprobe.json
+          python - "$CLIP" <<'PY'
+          import json, subprocess, sys
+          p=sys.argv[1]
+          d=json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams","-show_format","-of","json",p]))
+          v=next(s for s in d["streams"] if s["codec_type"]=="video")
+          assert (v.get("width"),v.get("height"))==(1080,1920), (v.get("width"),v.get("height"))
+          assert v.get("codec_name")=="h264", v.get("codec_name")
+          assert v.get("pix_fmt")=="yuv420p", v.get("pix_fmt")
+          br=int(d["format"].get("bit_rate",0))
+          assert br>=6000000, f"bitrate below 6 Mbps: {br}"
+          duration=float(d["format"]["duration"])
+          assert duration>=21, f"clip too short for screenshot checkpoints: {duration}"
+          print(f"Validated: 1080x1920 H.264 yuv420p, bitrate={br}, duration={duration:.2f}s")
+          PY
+          for t in 2 10 20; do
+            ffmpeg -y -loglevel error -ss "$t" -i "$CLIP" -frames:v 1 "qa/${{ matrix.label }}/screenshot_${t}s.png"
+          done
+      - name: Upload QA evidence (no posting/upload to external services)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-v2-${{ matrix.label }}-evidence
+          path: qa/${{ matrix.label }}/
+          if-no-files-found: warn
