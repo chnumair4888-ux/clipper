@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core
           python -m pip install --upgrade pip
-          python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow uroman opencv-python-headless numpy opencv-python-headless numpy
+          python -m pip install yt-dlp gdown faster-whisper requests edge-tts pillow uroman opencv-python-headless numpy
       - name: Syntax and safeguard tests
         run: |
           python -m py_compile clipper.py
@@ -51,7 +51,7 @@ jobs:
           mkdir -p qa/${{ matrix.label }}
           python clipper.py 2>&1 | tee qa/${{ matrix.label }}/run.log
           cp out/quality_report.json qa/${{ matrix.label }}/quality_report.json
-          cp c0.ass qa/${{ matrix.label }}/captions.ass
+          cp c1.ass qa/${{ matrix.label }}/captions.ass
           CLIP="$(find out/vertical -name 'clip_*.mp4' | head -1)"
           test -s "$CLIP"
           ffprobe -v error -show_streams -show_format -of json "$CLIP" | tee qa/${{ matrix.label }}/ffprobe.json
