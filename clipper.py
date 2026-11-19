@@ -515,7 +515,7 @@ def animated_captions(path, start, end, vertical):
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Pop,{FONT},{font_size},&H00FFFFFF,&H0000D7FF,&H00000000,"
-        f"&H80000000,-1,0,0,0,100,100,0,0,1,5,1,2,50,50,{bottom},1\n\n"
+        f"&H80000000,-1,0,0,0,100,100,0,0,1,6,0,2,130,130,{bottom},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
     )
