@@ -572,7 +572,7 @@ def render(i, clip, orient):
     elif layout == "split" and FACE_BOX:
         x, y, fw, fh = FACE_BOX
         source_w = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0", "video.mp4"]).decode().strip())
-        source_h = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", "video.mp4").decode().strip())
+        source_h = int(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", "video.mp4"]).decode().strip())
         pad = int(max(fw, fh) * 0.7)
         x, y = max(0, x-pad), max(0, y-pad)
         fw, fh = min(source_w-x, fw+2*pad), min(source_h-y, fh+2*pad)
